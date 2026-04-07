@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#1a7f37" />
+    <meta name="description" content="Gerenciador de fila de times - offline first com IndexedDB" />
+    <link rel="manifest" href="manifest.json" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚽</text></svg>" />
+    <title>Arjen - Fila de Times</title>
+    <script type="module" crossorigin src="/assets/index-RsAfs2zR.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-DfyeXPTV.css">
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      // Registrar Service Worker para PWA offline
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          // Usa caminho relativo ao base path para compatibilidade com GH Pages
+          const base = document.querySelector('base')?.href || '/';
+          const swUrl = new URL('sw.js', base).href;
+          navigator.serviceWorker.register(swUrl)
+            .then(reg => console.log('Service Worker registrado:', reg.scope))
+            .catch(err => console.error('Erro ao registrar SW:', err));
+        });
+      }
+    </script>
+  </body>
+</html>
+
