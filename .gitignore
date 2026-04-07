@@ -1,0 +1,135 @@
+# ======================
+# IDEs e Editores
+# ======================
+
+### IntelliJ IDEA ###
+.idea/
+*.iml
+*.iws
+*.ipr
+node_modules
+dist
+out/
+!**/src/main/**/out/
+!**/src/test/**/out/
+
+### Kotlin ###
+.kotlin/
+
+### Eclipse ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+bin/
+!**/src/main/**/bin/
+!**/src/test/**/bin/
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/nbdist/
+/.nb-gradle/
+
+### VS Code ###
+.vscode/
+
+### Mac OS ###
+.DS_Store
+Thumbs.db
+
+# ======================
+# Dependências
+# ======================
+node_modules/
+.pnp
+.pnp.js
+.yarn/cache
+.yarn/unplugged
+
+# ======================
+# Build / Distribuição
+# ======================
+dist/
+dist-ssr/
+build/
+.output/
+*.local
+
+### Gradle / JVM ###
+.gradle/
+**/build/
+!**/src/**/build/
+*.class
+*.jar
+*.war
+*.ear
+
+# ======================
+# Cache e arquivos temporários
+# ======================
+.cache/
+.turbo/
+.parcel-cache/
+*.tsbuildinfo
+*.swp
+*.swo
+*~
+tmp/
+temp/
+
+# ======================
+# Logs
+# ======================
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ======================
+# Variáveis de ambiente e segredos
+# ======================
+.env
+.env.*
+!.env.example
+!.env.sample
+secrets/
+*.secret
+*.pem
+*.key
+*.p12
+*.pfx
+*.cer
+*.crt
+
+# ======================
+# Testes e cobertura
+# ======================
+coverage/
+.nyc_output/
+*.lcov
+
+# ======================
+# Banco de dados local
+# ======================
+*.db
+*.sqlite
+*.sqlite3
+data/*.db
+
+# ======================
+# Docker
+# ======================
+docker-compose.override.yml
+
+# ======================
+# Misc
+# ======================
+*.bak
+*.orig
