@@ -7,8 +7,6 @@
 *.iml
 *.iws
 *.ipr
-node_modules
-dist
 out/
 !**/src/main/**/out/
 !**/src/test/**/out/
@@ -49,6 +47,7 @@ node_modules/
 .pnp.js
 .yarn/cache
 .yarn/unplugged
+.yarn/install-state.gz
 
 # ======================
 # Build / Distribuição
@@ -58,6 +57,7 @@ dist-ssr/
 build/
 .output/
 *.local
+*.tgz
 
 ### Gradle / JVM ###
 .gradle/
@@ -75,11 +75,19 @@ build/
 .turbo/
 .parcel-cache/
 *.tsbuildinfo
+.eslintcache
 *.swp
 *.swo
 *~
 tmp/
 temp/
+
+# ======================
+# Testes
+# ======================
+coverage/
+*.lcov
+.nyc_output/
 
 # ======================
 # Logs
@@ -96,6 +104,10 @@ lerna-debug.log*
 # Variáveis de ambiente e segredos
 # ======================
 .env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 .env.*
 !.env.example
 !.env.sample
