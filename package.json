@@ -4,7 +4,7 @@
   "description": "Web app offline-first para gerenciar fila de jogadores e formar times usando IndexedDB",
   "private": true,
   "type": "module",
-  "homepage": "https://<seu-usuario>.github.io/team-queue-indexeddb/",
+  "homepage": "https://paulogrell.github.io/patron-team/",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
