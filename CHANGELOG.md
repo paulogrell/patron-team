@@ -2,6 +2,21 @@
 
 Todas as mudanças relevantes do projeto são documentadas aqui.
 
+## [1.2.0] - 2026-04-09
+
+### Adicionado
+- IndexedDB **v3**: `rounds`, `meta`, `player_stats`; `roundId` em times e partidas; migração a partir de v2.
+- Formação **múltiplos times** (`formTeamsForRound`), **rebalanceamento** (`rebalanceTeams`), **toggle** de time bloqueado.
+- Partidas **agendadas** (`scheduleMatch`) e **finalização** (`finalizeMatch`); stats por partida (`bulkUpsertPlayerStats`) com regras em `src/domain/playerStatRules.js`.
+- **Sugestão MVP** de confronto (`suggestNextMatchForRound` + `nextMatchEngine.js`).
+- **Estatísticas da rodada** (`getRoundStatistics`) e terceira aba na UI; seletor de rodada (`RoundSelector`); modal `MatchStatsModal`.
+- Export/import com `schemaVersion: 3`, `rounds`, `meta`, `player_stats`.
+- Service worker cache `team-queue-v3`.
+
+### Alterado
+- `formTeam(size, roundId)` e `recordMatch(roundId, ...)` passam a exigir rodada; `removePlayer` aceita `roundId` opcional para substituição.
+- README e DOCS/ARCHITECTURE atualizados; testes Vitest para `formTeamsForRound` e `playerStatRules`.
+
 ## [1.1.0] - 2026-04-07
 
 ### Adicionado

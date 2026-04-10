@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 3,
+  "exportedAt": "2026-04-09T12:00:00.000Z",
+  "players": [
+    { "id": "bbbb0001-0001-4000-8000-000000000001", "name": "André Silva", "status": "available", "joinedAt": "2026-04-09T08:00:00.000Z", "goals": 0, "assists": 0 },
+    { "id": "bbbb0001-0002-4000-8000-000000000002", "name": "Bruno Costa", "status": "available", "joinedAt": "2026-04-09T08:01:00.000Z", "goals": 0, "assists": 0 },
+    { "id": "bbbb0001-0003-4000-8000-000000000003", "name": "Carla Mendes", "status": "available", "joinedAt": "2026-04-09T08:02:00.000Z", "goals": 0, "assists": 0 },
+    { "id": "bbbb0001-0004-4000-8000-000000000004", "name": "Diego Alves", "status": "available", "joinedAt": "2026-04-09T08:03:00.000Z", "goals": 0, "assists": 0 },
+    { "id": "bbbb0001-0005-4000-8000-000000000005", "name": "Eduarda Lima", "status": "available", "joinedAt": "2026-04-09T08:04:00.000Z", "goals": 0, "assists": 0 },
+    { "id": "bbbb0001-0006-4000-8000-000000000006", "name": "Felipe Rocha", "status": "available", "joinedAt": "2026-04-09T08:05:00.000Z", "goals": 0, "assists": 0 },
+    { "id": "bbbb0001-0007-4000-8000-000000000007", "name": "Gabriela Dias", "status": "available", "joinedAt": "2026-04-09T08:06:00.000Z", "goals": 0, "assists": 0 },
+    { "id": "bbbb0001-0008-4000-8000-000000000008", "name": "Henrique Souza", "status": "available", "joinedAt": "2026-04-09T08:07:00.000Z", "goals": 0, "assists": 0 },
+    { "id": "bbbb0001-0009-4000-8000-000000000009", "name": "Isabela Freitas", "status": "available", "joinedAt": "2026-04-09T08:08:00.000Z", "goals": 0, "assists": 0 },
+    { "id": "bbbb0001-0010-4000-8000-000000000010", "name": "João Pedro", "status": "available", "joinedAt": "2026-04-09T08:09:00.000Z", "goals": 0, "assists": 0 },
+    { "id": "bbbb0001-0011-4000-8000-000000000011", "name": "Karina Nunes", "status": "available", "joinedAt": "2026-04-09T08:10:00.000Z", "goals": 0, "assists": 0 },
+    { "id": "bbbb0001-0012-4000-8000-000000000012", "name": "Lucas Martins", "status": "available", "joinedAt": "2026-04-09T08:11:00.000Z", "goals": 0, "assists": 0 },
+    { "id": "bbbb0001-0013-4000-8000-000000000013", "name": "Mariana Teixeira", "status": "available", "joinedAt": "2026-04-09T08:12:00.000Z", "goals": 0, "assists": 0 },
+    { "id": "bbbb0001-0014-4000-8000-000000000014", "name": "Nicolas Barros", "status": "available", "joinedAt": "2026-04-09T08:13:00.000Z", "goals": 0, "assists": 0 },
+    { "id": "bbbb0001-0015-4000-8000-000000000015", "name": "Olívia Campos", "status": "available", "joinedAt": "2026-04-09T08:14:00.000Z", "goals": 0, "assists": 0 },
+    { "id": "bbbb0001-0016-4000-8000-000000000016", "name": "Paulo Henrique", "status": "available", "joinedAt": "2026-04-09T08:15:00.000Z", "goals": 0, "assists": 0 },
+    { "id": "bbbb0001-0017-4000-8000-000000000017", "name": "Rafaela Gomes", "status": "available", "joinedAt": "2026-04-09T08:16:00.000Z", "goals": 0, "assists": 0 },
+    { "id": "bbbb0001-0018-4000-8000-000000000018", "name": "Samuel Vieira", "status": "available", "joinedAt": "2026-04-09T08:17:00.000Z", "goals": 0, "assists": 0 },
+    { "id": "bbbb0001-0019-4000-8000-000000000019", "name": "Tatiana Lopes", "status": "available", "joinedAt": "2026-04-09T08:18:00.000Z", "goals": 0, "assists": 0 },
+    { "id": "bbbb0001-0020-4000-8000-000000000020", "name": "Vinícius Moura", "status": "available", "joinedAt": "2026-04-09T08:19:00.000Z", "goals": 0, "assists": 0 }
+  ],
+  "teams": [],
+  "matches": []
+}

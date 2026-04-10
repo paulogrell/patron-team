@@ -1,0 +1,39 @@
+/**
+ * MVP de sugestão de próxima partida (referência conceitual: SLF NextMatchGenerator).
+ * Heurística local: dois times em campo, não bloqueados, mais antigos primeiro.
+ */
+
+function rosterMeetsTeamSize(team, teamSize) {
+  if (!teamSize || teamSize < 1) return true;
+  return (team?.players?.length ?? 0) >= teamSize;
+}
+
+/**
+ * @param {object[]} teams - times da rodada (já filtrados por roundId)
+ * @param {object[]} finalizedMatches - partidas com status === 'finalized', ordenadas por timestamp asc
+ * @param {number} [teamSize=5] — jogadores mínimos por time (mesmo limite de “Formar time”)
+ * @returns {{ ok: true, teamAId: string, teamBId: string } | { ok: false, error: string }}
+ */
+export function suggestNextMatch(teams, finalizedMatches = [], teamSize = 5) {
+  const inField = teams
+    .filter(
+      (t) => t.status === 'in_field' && !t.isBlocked && rosterMeetsTeamSize(t, teamSize)
+    )
+    .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+
+  if (inField.length < 2) {
+    return {
+      ok: false,
+      error:
+        'São necessários 2 times em campo (não bloqueados) com elenco completo para o limite de jogadores por time. Forme os times, ajuste o limite ou aguarde o fluxo da fila.',
+    };
+  }
+
+  void finalizedMatches;
+
+  return {
+    ok: true,
+    teamAId: inField[0].id,
+    teamBId: inField[1].id,
+  };
+}

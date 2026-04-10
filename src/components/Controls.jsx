@@ -1,31 +1,23 @@
 import React, { useState, useRef } from 'react';
 
 /**
- * Controls — Painel de controles com botões de ação rápida.
- * Permite adicionar jogadores, formar times, registrar partidas
- * e fazer export/import de dados.
- *
- * @param {object} props
- * @param {function} props.onAddPlayer - Callback para adicionar jogador
- * @param {function} props.onFormTeam - Callback para formar time
- * @param {function} props.onRecordMatch - Callback para registrar partida
- * @param {function} props.onExport - Callback para exportar dados
- * @param {function} props.onImport - Callback para importar dados
- * @param {Array} props.teamsInField - Times atualmente em campo
+ * Controles: jogadores, formar um time (limite N), sugestão de partida, backup.
  */
 export default function Controls({
   onAddPlayer,
   onFormTeam,
-  onRecordMatch,
+  onSuggestNext,
+  suggestion,
+  onScheduleSuggested,
   onExport,
   onImport,
-  teamsInField,
+  activeRoundId,
+  teamSize,
+  onTeamSizeChange,
 }) {
   const [playerName, setPlayerName] = useState('');
-  const [teamSize, setTeamSize] = useState(5);
   const fileInputRef = useRef(null);
 
-  // Adiciona jogador ao pressionar Enter ou clicar no botão
   const handleAddPlayer = (e) => {
     e.preventDefault();
     if (playerName.trim()) {
@@ -34,11 +26,9 @@ export default function Controls({
     }
   };
 
-  // Importa dados de um arquivo JSON
   const handleImportFile = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
@@ -49,17 +39,18 @@ export default function Controls({
       }
     };
     reader.readAsText(file);
-    // Limpa o input para permitir reimportação do mesmo arquivo
     e.target.value = '';
   };
 
+  const canAct = Boolean(activeRoundId);
+
   return (
     <div className="panel controls-panel">
-      <h2>🎮 Controles</h2>
+      <h2>Controles</h2>
+      {!canAct && <p className="info-message">Carregando rodada…</p>}
 
-      {/* Seção: Adicionar jogador */}
       <section className="control-section">
-        <h3>Adicionar Jogador</h3>
+        <h3>Adicionar jogador</h3>
         <form onSubmit={handleAddPlayer} className="add-player-form">
           <input
             type="text"
@@ -69,15 +60,17 @@ export default function Controls({
             className="input-text"
             autoFocus
           />
-          <button type="submit" className="btn btn-primary">
-            ➕ Adicionar
+          <button type="submit" className="btn btn-primary" disabled={!canAct}>
+            Adicionar
           </button>
         </form>
       </section>
 
-      {/* Seção: Formar time */}
       <section className="control-section">
-        <h3>Formar Time</h3>
+        <h3>Limite de jogadores por time</h3>
+        <p className="info-message subtle">
+          Use o mesmo número ao formar time e ao calcular a próxima partida automática.
+        </p>
         <div className="form-row">
           <label htmlFor="teamSize">Jogadores por time:</label>
           <input
@@ -86,66 +79,62 @@ export default function Controls({
             min="1"
             max="20"
             value={teamSize}
-            onChange={(e) => setTeamSize(Number(e.target.value))}
+            onChange={(e) => onTeamSizeChange(Number(e.target.value))}
             className="input-number"
           />
-          <button onClick={() => onFormTeam(teamSize)} className="btn btn-success">
-            👥 Formar Time
+          <button
+            type="button"
+            onClick={() => onFormTeam(teamSize)}
+            className="btn btn-success"
+            disabled={!canAct}
+          >
+            Formar 1 time
           </button>
         </div>
       </section>
 
-      {/* Seção: Registrar resultado da partida */}
       <section className="control-section">
-        <h3>Registrar Partida</h3>
-        {teamsInField.length < 2 ? (
+        <h3>Próxima partida (sugestão)</h3>
+        <button
+          type="button"
+          className="btn btn-outline"
+          disabled={!canAct}
+          onClick={() => onSuggestNext()}
+        >
+          Sugerir confronto
+        </button>
+        {suggestion?.ok && (
           <p className="info-message">
-            ⚠️ É necessário pelo menos 2 times em campo para registrar uma partida.
+            Dois primeiros times em campo (não bloqueados). Agende para registrar no histórico.
           </p>
-        ) : (
-          <div className="match-controls">
-            <p className="info-message">
-              Times em campo: <strong>{teamsInField.length}</strong>
-            </p>
-            <div className="match-buttons">
-              <button
-                className="btn btn-match btn-a-win"
-                onClick={() =>
-                  onRecordMatch(teamsInField[0].id, teamsInField[1].id, 'A_win')
-                }
-              >
-                🏆 Time A Venceu
-              </button>
-              <button
-                className="btn btn-match btn-draw"
-                onClick={() =>
-                  onRecordMatch(teamsInField[0].id, teamsInField[1].id, 'draw')
-                }
-              >
-                🤝 Empate
-              </button>
-              <button
-                className="btn btn-match btn-b-win"
-                onClick={() =>
-                  onRecordMatch(teamsInField[0].id, teamsInField[1].id, 'B_win')
-                }
-              >
-                🏆 Time B Venceu
-              </button>
-            </div>
-          </div>
+        )}
+        {suggestion && !suggestion.ok && (
+          <p className="info-message warning-text">{suggestion.error}</p>
+        )}
+        {suggestion?.ok && (
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={!canAct}
+            onClick={() => onScheduleSuggested()}
+          >
+            Agendar partida sugerida
+          </button>
         )}
       </section>
 
-      {/* Seção: Backup / Restore */}
       <section className="control-section">
-        <h3>💾 Backup / Restore</h3>
+        <h3>Backup / Restore</h3>
         <div className="backup-buttons">
-          <button onClick={onExport} className="btn btn-outline">
-            📤 Exportar Dados
+          <button type="button" onClick={onExport} className="btn btn-outline">
+            Exportar dados
           </button>
-          <button onClick={() => fileInputRef.current?.click()} className="btn btn-outline">
-            📥 Importar Dados
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="btn btn-outline"
+          >
+            Importar dados
           </button>
           <input
             ref={fileInputRef}
@@ -159,4 +148,3 @@ export default function Controls({
     </div>
   );
 }
-
