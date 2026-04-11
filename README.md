@@ -8,12 +8,16 @@ O **Arjen Queue** é uma aplicação React que funciona completamente offline, u
 
 ### Principais funcionalidades
 
+- 📅 **Rodadas** — Várias rodadas locais; troca de rodada ativa e “Nova rodada”; times e partidas ficam escopados por `roundId`
 - 📋 **Fila FIFO** — Jogadores entram na fila por ordem de chegada
-- 👥 **Formação automática de times** — Seleciona os primeiros N disponíveis
+- 👥 **Formação de times** — Um time por vez ou **vários times de uma vez** (N × jogadores por time)
+- ⚖️ **Rebalancear** — Redistribui elencos entre times em campo não bloqueados (round-robin)
+- 💡 **Próxima partida (MVP)** — Sugestão com dois primeiros times em campo; opção de **agendar** partida, editar **stats por partida**, depois **finalizar**
 - 🔄 **Substituição inteligente** — Substitui jogadores lesionados/cansados atomicamente
-- 🏆 **Registro de partidas** — Vitória, derrota ou empate com regras automáticas
-- 📊 **Estatísticas de jogadores** — Controle de gols e assistências por jogador
-- 💾 **Export/Import** — Backup completo em JSON
+- 🏆 **Registro de partidas** — Vitória, derrota ou empate com regras automáticas na rodada
+- 📊 **Estatísticas** — Aba **globais** (`players.goals` / `assists`) e aba **da rodada** (somente `player_stats` das partidas finalizadas; alinhado conceitualmente ao SLF)
+- 🔒 **Times bloqueados** — Excluídos do rebalanceamento MVP e da sugestão simples
+- 💾 **Export/Import** — Backup JSON `schemaVersion: 3` (`rounds`, `meta`, `player_stats`)
 - 📡 **Sincronização entre abas** — Via BroadcastChannel
 - 📱 **PWA Offline** — Funciona sem internet após primeiro carregamento
 - 🚀 **Deploy no GitHub Pages** — Workflow automático via GitHub Actions
@@ -53,22 +57,28 @@ npm run test:watch
 ### 1. Adicionar jogadores
 No painel **Controles**, digite o nome do jogador e clique em **➕ Adicionar**. Os jogadores aparecem na fila ordenados por chegada.
 
-### 2. Formar times
-Defina o número de jogadores por time e clique em **👥 Formar Time**. Os primeiros N jogadores disponíveis serão automaticamente selecionados (FIFO).
+### 2. Rodada ativa
+No painel **Rodada**, escolha a rodada ou crie uma nova. Todos os times e partidas exibidos pertencem à rodada ativa.
 
-### 3. Registrar partidas
+### 3. Formar times
+Use **Formar um time** (FIFO) ou **Formar vários times** com quantidade de times e jogadores por time. **Rebalancear** redistribui só entre times em campo não bloqueados.
+
+### 4. Registrar partidas
 Com pelo menos 2 times em campo, use os botões para registrar o resultado:
 - **🏆 Time A Venceu** — Time B volta para o fim da fila
 - **🏆 Time B Venceu** — Time A volta para o fim da fila
 - **🤝 Empate** — Ambos os times saem e voltam ao fim da fila
 
-### 4. Lesões e substituições
+### 5. Partida agendada e stats
+**Sugerir confronto** e **Agendar partida sugerida** criam uma partida agendada. No histórico, use **Stats** para gols/assistências/gols contra/goleiro por jogador (validações tipo SLF). Finalize com A venceu / Empate / B venceu.
+
+### 6. Lesões e substituições
 Para jogadores em campo:
 - **🤕 Lesão** — Marca como lesionado e remove do time
 - **😓 Cansado** — Marca como cansado
 - **🔄 Substituir** — Substitui pelo próximo jogador disponível na fila
 
-### 5. Estatísticas de jogadores (⚽ Gols & 👟 Assistências)
+### 7. Estatísticas de jogadores (⚽ Gols & 👟 Assistências)
 Clique na aba **📊 Estatísticas** no topo da aplicação para acessar o módulo de estatísticas. Neste painel você pode:
 - Ver todos os jogadores com seus gols, assistências e total de participações
 - Usar os botões **+** e **−** ao lado de cada jogador para registrar/corrigir gols e assistências
@@ -76,7 +86,10 @@ Clique na aba **📊 Estatísticas** no topo da aplicação para acessar o módu
 - Ordenar por nome, gols, assistências ou total clicando nos cabeçalhos das colunas
 - Acompanhar o resumo geral (total de jogadores, gols, assistências e participações) no topo
 
-### 6. Backup e restore
+### 8. Estatísticas da rodada
+A terceira aba agrega vitórias/empates/derrotas e números por partida a partir de `player_stats` (não usa os totais globais da segunda aba).
+
+### 9. Backup e restore
 - **📤 Exportar** — Baixa um arquivo JSON com todos os dados (incluindo gols e assistências)
 - **📥 Importar** — Carrega um arquivo JSON substituindo todos os dados
 

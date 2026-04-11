@@ -1,6 +1,6 @@
 {
   "name": "team-queue-indexeddb",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Web app offline-first para gerenciar fila de jogadores e formar times usando IndexedDB",
   "private": true,
   "type": "module",
