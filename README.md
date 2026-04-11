@@ -207,6 +207,8 @@ vercel
 
 ## Próximos Passos
 
+## Próximos Passos
+
 - [ ] Sincronização em nuvem (Firebase/Supabase)
 - [ ] Notificações push quando é hora de jogar
 - [x] ~~Estatísticas de gols e assistências por jogador~~
@@ -214,6 +216,10 @@ vercel
 - [ ] Modo escuro
 - [ ] Drag & drop para reordenar fila manualmente
 - [ ] Timer de partida integrado
+- [ ] Garbage collector mantendo lista e stats
+- [ ] Ícones de ++ e -- nos gols e assistências
+- [ ] Lista separada de goleiro
+- [ ] Lista de partidas: manter FIFO e adicionar ordenação por data (redundância)
 
 ## Tecnologias
 
