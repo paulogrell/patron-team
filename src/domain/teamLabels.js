@@ -29,3 +29,16 @@ export function buildTeamLabelById(teamsInField, teamsWaiting) {
   }
   return map;
 }
+
+/**
+ * Lado do confronto (match.teamA = A esquerda, match.teamB = B direita).
+ * Não mistura com rótulo FIFO "Time A" da fila — sempre Time A/B = lado do placar.
+ */
+export function labelMatchSide(teamId, sideLetter, teamById) {
+  const t = teamById?.[teamId];
+  const d = t?.displayName?.trim();
+  const n = t?.players?.length ?? 0;
+  if (d) return `${d} (Time ${sideLetter})`;
+  if (n) return `Time ${sideLetter} (${n} jog.)`;
+  return `Time ${sideLetter}`;
+}

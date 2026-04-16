@@ -1,4 +1,5 @@
 import React from 'react';
+import { labelMatchSide } from '../domain/teamLabels.js';
 
 /**
  * Histórico de partidas da rodada (finalizadas e agendadas) com placar numérico.
@@ -10,8 +11,7 @@ export default function MatchHistory({
   matchScores,
   onEditStats,
   onEditScheduledMatch,
-  onFinalize,
-  onRequestDraw,
+  onDeleteMatch,
 }) {
   const teamMap = {};
   for (const t of teams) {
@@ -36,7 +36,6 @@ export default function MatchHistory({
     return `${tag} (${t.players?.length || 0} jog.)`;
   };
 
-  /** Nome curto para botões e resultado: displayName, ou Time A/B/C…, ou Lado A/B do confronto */
   const teamWinName = (teamId, match) => {
     const t = teamMap[teamId];
     const side = teamId === match.teamA ? 'A' : 'B';
@@ -57,7 +56,7 @@ export default function MatchHistory({
   };
 
   return (
-    <div className="panel history-panel">
+    <div className="panel history-panel" data-testid="matches-panel">
       <h2>Partidas da rodada ({matches.length})</h2>
       {sortedMatches.length === 0 ? (
         <p className="empty-message">Nenhuma partida nesta rodada ainda.</p>
@@ -71,8 +70,16 @@ export default function MatchHistory({
               }`}
             >
               <div className="match-card-stack">
-                <div className="match-line-teams">
-                  {labelForTeam(match.teamA)} × {labelForTeam(match.teamB)}
+                <div className="match-line-teams match-line-teams--standard-ab">
+                  <span className="match-line-team-slot match-line-team-slot--a">
+                    {labelMatchSide(match.teamA, 'A', teamMap)}
+                  </span>
+                  <span className="match-line-vs" aria-hidden="true">
+                    ×
+                  </span>
+                  <span className="match-line-team-slot match-line-team-slot--b">
+                    {labelMatchSide(match.teamB, 'B', teamMap)}
+                  </span>
                   {match.status === 'scheduled' && (
                     <span className="badge-scheduled">Agendada</span>
                   )}
@@ -100,37 +107,19 @@ export default function MatchHistory({
                       Editar
                     </button>
                   )}
+                  {onDeleteMatch && (
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-sm btn-danger-outline"
+                      onClick={() => onDeleteMatch(match.id, match.status)}
+                    >
+                      Excluir
+                    </button>
+                  )}
                 </div>
                 {match.status === 'finalized' && match.result && (
                   <div className="match-line-result-outcome">
                     <span className="match-score-result">{outcomeText(match)}</span>
-                  </div>
-                )}
-                {match.status === 'scheduled' && (
-                  <div className="match-line-finalize">
-                    <button
-                      type="button"
-                      className="btn btn-match btn-a-win btn-sm"
-                      title={labelForTeam(match.teamA)}
-                      onClick={() => onFinalize(match.id, 'A_win')}
-                    >
-                      {teamWinName(match.teamA, match)} venceu
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-match btn-draw btn-sm"
-                      onClick={() => onRequestDraw(match)}
-                    >
-                      Empate
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-match btn-b-win btn-sm"
-                      title={labelForTeam(match.teamB)}
-                      onClick={() => onFinalize(match.id, 'B_win')}
-                    >
-                      {teamWinName(match.teamB, match)} venceu
-                    </button>
                   </div>
                 )}
               </div>

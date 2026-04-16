@@ -1,15 +1,23 @@
 import React, { useState, useEffect } from 'react';
 
-export default function EditPlayerModal({ player, onClose, onSave }) {
+export default function EditPlayerModal({ player, onClose, onSave, onDelete }) {
   const [name, setName] = useState(player?.name ?? '');
+  const [goalkeeperOnly, setGoalkeeperOnly] = useState(Boolean(player?.goalkeeperOnly));
+  const [preferGoalkeeper, setPreferGoalkeeper] = useState(Boolean(player?.preferGoalkeeper));
 
   useEffect(() => {
     setName(player?.name ?? '');
+    setGoalkeeperOnly(Boolean(player?.goalkeeperOnly));
+    setPreferGoalkeeper(Boolean(player?.preferGoalkeeper));
   }, [player]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    await onSave(player.id, name);
+    await onSave(player.id, {
+      name,
+      goalkeeperOnly,
+      preferGoalkeeper: goalkeeperOnly ? true : preferGoalkeeper,
+    });
   };
 
   return (
@@ -30,7 +38,39 @@ export default function EditPlayerModal({ player, onClose, onSave }) {
             autoComplete="off"
             autoFocus
           />
+          <label className="modal-form-label modal-checkbox-row" htmlFor="edit-player-gk-only">
+            <input
+              id="edit-player-gk-only"
+              type="checkbox"
+              checked={goalkeeperOnly}
+              onChange={(e) => {
+                const v = e.target.checked;
+                setGoalkeeperOnly(v);
+                if (v) setPreferGoalkeeper(true);
+              }}
+            />
+            Só goleiro (fora da fila de linha e da formação automática)
+          </label>
+          <label className="modal-form-label modal-checkbox-row" htmlFor="edit-player-goalkeeper">
+            <input
+              id="edit-player-goalkeeper"
+              type="checkbox"
+              checked={preferGoalkeeper}
+              disabled={goalkeeperOnly}
+              onChange={(e) => setPreferGoalkeeper(e.target.checked)}
+            />
+            Aparecer também na lista de goleiros (jogador de linha)
+          </label>
           <div className="modal-actions">
+            {onDelete && (
+              <button
+                type="button"
+                className="btn btn-danger-outline"
+                onClick={() => onDelete(player.id)}
+              >
+                Excluir jogador
+              </button>
+            )}
             <button type="button" className="btn btn-outline" onClick={onClose}>
               Cancelar
             </button>

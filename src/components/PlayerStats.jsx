@@ -18,6 +18,7 @@ export default function PlayerStats({
   onRemoveGoal,
   onRecordAssist,
   onRemoveAssist,
+  showWinDrawLoss = false,
 }) {
   // Coluna e direção de ordenação
   const [sortBy, setSortBy] = useState('goals'); // 'name', 'goals', 'assists', 'total'
@@ -60,6 +61,18 @@ export default function PlayerStats({
         case 'total':
           valA = (a.goals || 0) + (a.assists || 0);
           valB = (b.goals || 0) + (b.assists || 0);
+          break;
+        case 'wins':
+          valA = a.wins || 0;
+          valB = b.wins || 0;
+          break;
+        case 'draws':
+          valA = a.draws || 0;
+          valB = b.draws || 0;
+          break;
+        case 'losses':
+          valA = a.losses || 0;
+          valB = b.losses || 0;
           break;
         default:
           valA = a.goals || 0;
@@ -149,6 +162,28 @@ export default function PlayerStats({
                     Jogador {sortIcon('name')}
                   </th>
                   <th className="stats-th-status">Status</th>
+                  {showWinDrawLoss && (
+                    <>
+                      <th
+                        className="stats-th-stat sortable"
+                        onClick={() => handleSort('wins')}
+                      >
+                        ✅ V {sortIcon('wins')}
+                      </th>
+                      <th
+                        className="stats-th-stat sortable"
+                        onClick={() => handleSort('draws')}
+                      >
+                        🤝 E {sortIcon('draws')}
+                      </th>
+                      <th
+                        className="stats-th-stat sortable"
+                        onClick={() => handleSort('losses')}
+                      >
+                        ❌ D {sortIcon('losses')}
+                      </th>
+                    </>
+                  )}
                   <th
                     className="stats-th-stat sortable"
                     onClick={() => handleSort('goals')}
@@ -176,6 +211,13 @@ export default function PlayerStats({
                     <td className="stats-rank">{index + 1}</td>
                     <td className="stats-name">{player.name}</td>
                     <td className="stats-status">{statusLabel[player.status]}</td>
+                    {showWinDrawLoss && (
+                      <>
+                        <td className="stats-value">{player.wins || 0}</td>
+                        <td className="stats-value">{player.draws || 0}</td>
+                        <td className="stats-value">{player.losses || 0}</td>
+                      </>
+                    )}
                     <td className="stats-value">{player.goals || 0}</td>
                     <td className="stats-value">{player.assists || 0}</td>
                     <td className="stats-value stats-total">
@@ -187,17 +229,19 @@ export default function PlayerStats({
                           className="btn btn-sm btn-stat-minus"
                           onClick={() => onRemoveGoal(player.id)}
                           title="Remover gol"
+                          aria-label="Remover gol"
                           disabled={(player.goals || 0) === 0}
                         >
-                          −
+                          --
                         </button>
                         <span className="stats-action-label">⚽</span>
                         <button
                           className="btn btn-sm btn-stat-plus"
                           onClick={() => onRecordGoal(player.id)}
                           title="Registrar gol"
+                          aria-label="Registrar gol"
                         >
-                          +
+                          ++
                         </button>
                       </div>
                       <div className="stats-action-group">
@@ -205,17 +249,19 @@ export default function PlayerStats({
                           className="btn btn-sm btn-stat-minus"
                           onClick={() => onRemoveAssist(player.id)}
                           title="Remover assistência"
+                          aria-label="Remover assistência"
                           disabled={(player.assists || 0) === 0}
                         >
-                          −
+                          --
                         </button>
                         <span className="stats-action-label">👟</span>
                         <button
                           className="btn btn-sm btn-stat-plus"
                           onClick={() => onRecordAssist(player.id)}
                           title="Registrar assistência"
+                          aria-label="Registrar assistência"
                         >
-                          +
+                          ++
                         </button>
                       </div>
                     </td>

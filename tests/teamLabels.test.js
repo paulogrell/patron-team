@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildTeamLabelById, teamLabelAtIndex } from '../src/domain/teamLabels.js';
+import { buildTeamLabelById, teamLabelAtIndex, labelMatchSide } from '../src/domain/teamLabels.js';
 
 describe('teamLabels', () => {
   it('teamLabelAtIndex usa letras A–Z', () => {
@@ -17,5 +17,14 @@ describe('teamLabels', () => {
       b: 'Time B',
       c: 'Time C',
     });
+  });
+
+  it('labelMatchSide: lado A/B do placar, não FIFO', () => {
+    const byId = {
+      x: { id: 'x', displayName: '', players: [1, 2, 3] },
+      y: { id: 'y', displayName: 'Verde', players: [4] },
+    };
+    expect(labelMatchSide('x', 'A', byId)).toBe('Time A (3 jog.)');
+    expect(labelMatchSide('y', 'B', byId)).toBe('Verde (Time B)');
   });
 });

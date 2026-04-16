@@ -8,7 +8,7 @@ export default function RoundSelector({ rounds, activeRoundId, onSelectRound }) 
 
   if (rounds.length <= 1) {
     return (
-      <div className="panel round-selector-panel">
+      <div className="panel round-selector-panel" data-testid="round-panel">
         <h2>Rodada</h2>
         <p className="info-message">
           {active ? (
@@ -25,12 +25,13 @@ export default function RoundSelector({ rounds, activeRoundId, onSelectRound }) 
   }
 
   return (
-    <div className="panel round-selector-panel">
+    <div className="panel round-selector-panel" data-testid="round-panel">
       <h2>Rodada</h2>
       <div className="form-row">
         <label htmlFor="roundSelect">Rodada ativa (import legado):</label>
         <select
           id="roundSelect"
+          data-testid="round-select"
           className="input-text"
           value={activeRoundId || ''}
           onChange={(e) => onSelectRound(e.target.value)}
