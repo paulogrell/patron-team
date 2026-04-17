@@ -7,8 +7,36 @@ import {
   eligibleExternalGoalkeeperIds,
   getFieldRosterIds,
 } from '../domain/goalkeeperEligibility.js';
+import { labelMatchSide } from '../domain/teamLabels.js';
 
-function TeamStatsBlock({ title, team, rows, nameById, onUpdateRow }) {
+function StatStepper({ label, value, onDecrement, onIncrement }) {
+  return (
+    <div className="stats-action-group match-stats-stepper">
+      <button
+        type="button"
+        className="btn btn-sm btn-stat-minus"
+        aria-label={`Diminuir ${label}`}
+        title={`Diminuir ${label}`}
+        onClick={onDecrement}
+        disabled={(Number(value) || 0) <= 0}
+      >
+        --
+      </button>
+      <span className="stats-value match-stats-stepper-value">{Number(value) || 0}</span>
+      <button
+        type="button"
+        className="btn btn-sm btn-stat-plus"
+        aria-label={`Aumentar ${label}`}
+        title={`Aumentar ${label}`}
+        onClick={onIncrement}
+      >
+        ++
+      </button>
+    </div>
+  );
+}
+
+function TeamStatsBlock({ title, team, rows, nameById, onAdjustRow }) {
   if (!team) return null;
   return (
     <div className="match-stats-team-block panel stats-panel">
@@ -28,30 +56,27 @@ function TeamStatsBlock({ title, team, rows, nameById, onUpdateRow }) {
               <tr key={r.playerId}>
                 <td className="stats-name">{nameById[r.playerId] || r.playerId.slice(0, 8)}</td>
                 <td>
-                  <input
-                    type="number"
-                    min="0"
-                    className="input-number"
+                  <StatStepper
+                    label="gols"
                     value={r.goals}
-                    onChange={(e) => onUpdateRow(r.playerId, 'goals', e.target.value)}
+                    onDecrement={() => onAdjustRow(r.playerId, 'goals', -1)}
+                    onIncrement={() => onAdjustRow(r.playerId, 'goals', 1)}
                   />
                 </td>
                 <td>
-                  <input
-                    type="number"
-                    min="0"
-                    className="input-number"
+                  <StatStepper
+                    label="assistências"
                     value={r.assists}
-                    onChange={(e) => onUpdateRow(r.playerId, 'assists', e.target.value)}
+                    onDecrement={() => onAdjustRow(r.playerId, 'assists', -1)}
+                    onIncrement={() => onAdjustRow(r.playerId, 'assists', 1)}
                   />
                 </td>
                 <td>
-                  <input
-                    type="number"
-                    min="0"
-                    className="input-number"
+                  <StatStepper
+                    label="gols contra"
                     value={r.ownGoals}
-                    onChange={(e) => onUpdateRow(r.playerId, 'ownGoals', e.target.value)}
+                    onDecrement={() => onAdjustRow(r.playerId, 'ownGoals', -1)}
+                    onIncrement={() => onAdjustRow(r.playerId, 'ownGoals', 1)}
                   />
                 </td>
               </tr>
@@ -70,7 +95,7 @@ function GoalkeeperBlock({
   nameById,
   stats,
   onChangePlayer,
-  onChangeStat,
+  onAdjustStat,
 }) {
   return (
     <div className="match-gk-select panel stats-panel">
@@ -91,32 +116,29 @@ function GoalkeeperBlock({
         <div className="match-gk-stats-grid">
           <div className="match-gk-stat">
             <span className="match-gk-stat-label">Gols</span>
-            <input
-              type="number"
-              min="0"
-              className="input-number"
+            <StatStepper
+              label="gols do goleiro"
               value={stats.goals}
-              onChange={(e) => onChangeStat('goals', e.target.value)}
+              onDecrement={() => onAdjustStat('goals', -1)}
+              onIncrement={() => onAdjustStat('goals', 1)}
             />
           </div>
           <div className="match-gk-stat">
             <span className="match-gk-stat-label">Ass.</span>
-            <input
-              type="number"
-              min="0"
-              className="input-number"
+            <StatStepper
+              label="assistências do goleiro"
               value={stats.assists}
-              onChange={(e) => onChangeStat('assists', e.target.value)}
+              onDecrement={() => onAdjustStat('assists', -1)}
+              onIncrement={() => onAdjustStat('assists', 1)}
             />
           </div>
           <div className="match-gk-stat">
             <span className="match-gk-stat-label">G.C.</span>
-            <input
-              type="number"
-              min="0"
-              className="input-number"
+            <StatStepper
+              label="gols contra do goleiro"
               value={stats.ownGoals}
-              onChange={(e) => onChangeStat('ownGoals', e.target.value)}
+              onDecrement={() => onAdjustStat('ownGoals', -1)}
+              onIncrement={() => onAdjustStat('ownGoals', 1)}
             />
           </div>
         </div>
@@ -131,11 +153,12 @@ function GoalkeeperBlock({
 export default function MatchStatsModal({
   match,
   teams,
-  teamLabelById = {},
   allPlayers,
   roundId,
   onClose,
   onSaved,
+  onFinalizeFromStats,
+  onRequestDrawFromStats,
 }) {
   const nameById = useMemo(
     () => Object.fromEntries((allPlayers || []).map((p) => [p.id, p.name])),
@@ -261,56 +284,88 @@ export default function MatchStatsModal({
     };
   }, [match.id, match.teamA, match.teamB, match.rosterA, match.rosterB, teamMap]);
 
-  const updateRow = (setter, playerId, field, value) => {
+  const updateRow = (setter, playerId, field, delta) => {
     setter((prev) =>
       prev.map((r) =>
-        r.playerId === playerId ? { ...r, [field]: Number(value) || 0 } : r
+        r.playerId === playerId
+          ? { ...r, [field]: Math.max(0, (Number(r[field]) || 0) + delta) }
+          : r
       )
     );
   };
 
+  const buildCombinedPayload = () => {
+    const combined = [
+      ...rowsA.map((r) => ({
+        playerId: r.playerId,
+        teamId: match.teamA,
+        goals: r.goals,
+        assists: r.assists,
+        ownGoals: r.ownGoals,
+        wasGoalkeeper: false,
+      })),
+      ...rowsB.map((r) => ({
+        playerId: r.playerId,
+        teamId: match.teamB,
+        goals: r.goals,
+        assists: r.assists,
+        ownGoals: r.ownGoals,
+        wasGoalkeeper: false,
+      })),
+    ];
+    if (gkTeamA) {
+      combined.push({
+        playerId: gkTeamA,
+        teamId: match.teamA,
+        goals: Number(gkStatsA.goals) || 0,
+        assists: Number(gkStatsA.assists) || 0,
+        ownGoals: Number(gkStatsA.ownGoals) || 0,
+        wasGoalkeeper: true,
+      });
+    }
+    if (gkTeamB) {
+      combined.push({
+        playerId: gkTeamB,
+        teamId: match.teamB,
+        goals: Number(gkStatsB.goals) || 0,
+        assists: Number(gkStatsB.assists) || 0,
+        ownGoals: Number(gkStatsB.ownGoals) || 0,
+        wasGoalkeeper: true,
+      });
+    }
+    return combined;
+  };
+
+  const saveStatsToDb = async () => {
+    const combined = buildCombinedPayload();
+    await bulkUpsertPlayerStats(match.id, roundId, combined);
+  };
+
   const handleSave = async () => {
     try {
-      const combined = [
-        ...rowsA.map((r) => ({
-          playerId: r.playerId,
-          teamId: match.teamA,
-          goals: r.goals,
-          assists: r.assists,
-          ownGoals: r.ownGoals,
-          wasGoalkeeper: false,
-        })),
-        ...rowsB.map((r) => ({
-          playerId: r.playerId,
-          teamId: match.teamB,
-          goals: r.goals,
-          assists: r.assists,
-          ownGoals: r.ownGoals,
-          wasGoalkeeper: false,
-        })),
-      ];
-      if (gkTeamA) {
-        combined.push({
-          playerId: gkTeamA,
-          teamId: match.teamA,
-          goals: Number(gkStatsA.goals) || 0,
-          assists: Number(gkStatsA.assists) || 0,
-          ownGoals: Number(gkStatsA.ownGoals) || 0,
-          wasGoalkeeper: true,
-        });
-      }
-      if (gkTeamB) {
-        combined.push({
-          playerId: gkTeamB,
-          teamId: match.teamB,
-          goals: Number(gkStatsB.goals) || 0,
-          assists: Number(gkStatsB.assists) || 0,
-          ownGoals: Number(gkStatsB.ownGoals) || 0,
-          wasGoalkeeper: true,
-        });
-      }
-      await bulkUpsertPlayerStats(match.id, roundId, combined);
+      await saveStatsToDb();
       onSaved?.();
+      onClose();
+    } catch (err) {
+      alert(err.message || String(err));
+    }
+  };
+
+  const handleSaveAndSetResult = async (result) => {
+    if (match.status !== 'scheduled' || !onFinalizeFromStats || !onRequestDrawFromStats) return;
+    try {
+      await saveStatsToDb();
+    } catch (err) {
+      alert(err.message || String(err));
+      return;
+    }
+    try {
+      if (result === 'draw') {
+        await onRequestDrawFromStats();
+        onSaved?.();
+      } else {
+        await onFinalizeFromStats(result);
+      }
       onClose();
     } catch (err) {
       alert(err.message || String(err));
@@ -326,26 +381,33 @@ export default function MatchStatsModal({
   const goalsA = sumGoals(rowsA) + sumOwn(rowsB) + gkGoalsA + gkOwnB;
   const goalsB = sumGoals(rowsB) + sumOwn(rowsA) + gkGoalsB + gkOwnA;
 
-  const titleA = teamA?.displayName?.trim() || teamLabelById[match.teamA] || 'Time A';
-  const titleB = teamB?.displayName?.trim() || teamLabelById[match.teamB] || 'Time B';
+  const sideTitleA = labelMatchSide(match.teamA, 'A', teamMap);
+  const sideTitleB = labelMatchSide(match.teamB, 'B', teamMap);
 
   const canSave = rowsA.length > 0 || rowsB.length > 0 || gkTeamA || gkTeamB;
+  const isScheduled = match.status === 'scheduled';
+  const showResultActions = isScheduled && onFinalizeFromStats && onRequestDrawFromStats;
 
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true">
       <div className="modal-content match-stats-modal match-stats-modal-wide">
         <h3>Stats da partida</h3>
         <p className="modal-sub">
-          {titleA} à esquerda, {titleB} à direita (lados A e B da partida). Salve a qualquer momento.
+          Padrão do placar: <strong>Time A</strong> à esquerda, <strong>Time B</strong> à direita. Salve a
+          qualquer momento.
         </p>
         <div className="stats-summary match-stats-score-summary">
-          <div className="stats-summary-item">
+          <div className="stats-summary-item match-stats-score-summary--a">
             <span className="stats-summary-value">{goalsA}</span>
-            <span className="stats-summary-label">Gols {titleA}</span>
+            <span className="stats-summary-label">
+              <span className="stats-summary-main">Gols Time A (esq.)</span>
+            </span>
           </div>
-          <div className="stats-summary-item">
+          <div className="stats-summary-item match-stats-score-summary--b">
             <span className="stats-summary-value">{goalsB}</span>
-            <span className="stats-summary-label">Gols {titleB}</span>
+            <span className="stats-summary-label">
+              <span className="stats-summary-main">Gols Time B (dir.)</span>
+            </span>
           </div>
         </div>
         {!rowsA.length && !rowsB.length ? (
@@ -355,13 +417,13 @@ export default function MatchStatsModal({
           </p>
         ) : null}
         <div className="match-stats-split">
-          <div className="match-stats-side">
+          <div className="match-stats-side match-stats-side--team-a">
             <TeamStatsBlock
-              title={titleA}
+              title={sideTitleA}
               team={teamA || { id: match.teamA, players: rowsA.map((r) => r.playerId) }}
               rows={rowsA}
               nameById={nameById}
-              onUpdateRow={(pid, f, v) => updateRow(setRowsA, pid, f, v)}
+              onAdjustRow={(pid, f, delta) => updateRow(setRowsA, pid, f, delta)}
             />
             <GoalkeeperBlock
               label="Goleiro (fora do elenco)"
@@ -386,18 +448,21 @@ export default function MatchStatsModal({
                   ownGoals: line?.ownGoals ?? 0,
                 });
               }}
-              onChangeStat={(field, value) =>
-                setGkStatsA((prev) => ({ ...prev, [field]: Number(value) || 0 }))
+              onAdjustStat={(field, delta) =>
+                setGkStatsA((prev) => ({
+                  ...prev,
+                  [field]: Math.max(0, (Number(prev[field]) || 0) + delta),
+                }))
               }
             />
           </div>
-          <div className="match-stats-side">
+          <div className="match-stats-side match-stats-side--team-b">
             <TeamStatsBlock
-              title={titleB}
+              title={sideTitleB}
               team={teamB || { id: match.teamB, players: rowsB.map((r) => r.playerId) }}
               rows={rowsB}
               nameById={nameById}
-              onUpdateRow={(pid, f, v) => updateRow(setRowsB, pid, f, v)}
+              onAdjustRow={(pid, f, delta) => updateRow(setRowsB, pid, f, delta)}
             />
             <GoalkeeperBlock
               label="Goleiro (fora do elenco)"
@@ -422,12 +487,49 @@ export default function MatchStatsModal({
                   ownGoals: line?.ownGoals ?? 0,
                 });
               }}
-              onChangeStat={(field, value) =>
-                setGkStatsB((prev) => ({ ...prev, [field]: Number(value) || 0 }))
+              onAdjustStat={(field, delta) =>
+                setGkStatsB((prev) => ({
+                  ...prev,
+                  [field]: Math.max(0, (Number(prev[field]) || 0) + delta),
+                }))
               }
             />
           </div>
         </div>
+        {showResultActions ? (
+          <div className="match-stats-result-panel">
+            <h4 className="match-stats-result-title">Resultado (finaliza a partida)</h4>
+            <p className="modal-sub subtle">
+              Salva as stats acima e aplica o resultado. Empate pode abrir desempate se só houver um time na fila.
+            </p>
+            <div className="match-stats-result-actions">
+              <button
+                type="button"
+                className="btn btn-match btn-a-win btn-sm"
+                disabled={!canSave}
+                onClick={() => handleSaveAndSetResult('A_win')}
+              >
+                Time A venceu
+              </button>
+              <button
+                type="button"
+                className="btn btn-match btn-draw btn-sm"
+                disabled={!canSave}
+                onClick={() => handleSaveAndSetResult('draw')}
+              >
+                Empate
+              </button>
+              <button
+                type="button"
+                className="btn btn-match btn-b-win btn-sm"
+                disabled={!canSave}
+                onClick={() => handleSaveAndSetResult('B_win')}
+              >
+                Time B venceu
+              </button>
+            </div>
+          </div>
+        ) : null}
         <div className="modal-actions">
           <button type="button" className="btn btn-outline" onClick={onClose}>
             Cancelar

@@ -11,6 +11,8 @@ import React from 'react';
  * @param {function} [props.onToggleBlock] - alterna time bloqueado (próxima partida)
  * @param {function} [props.onEditTeam] - (team, defaultLabel) abre edição de rótulo
  * @param {number} [props.waitingQueueIndex] - posição na fila “próximos” (1-based), alinhada à ordem global
+ * @param {Record<string, number>} [props.playerFilaNumberById] - # na fila de jogadores (mesma ordem que QueueList, sem só-goleiro)
+ * @param {boolean} [props.stopPointerPropagationOnActions] - evita iniciar DnD ao tocar em botões (cards sortable)
  */
 export default function TeamCard({
   team,
@@ -19,12 +21,20 @@ export default function TeamCard({
   onToggleBlock,
   onEditTeam,
   waitingQueueIndex,
+  playerFilaNumberById = {},
+  stopPointerPropagationOnActions = false,
 }) {
   // Cria um mapa de jogadores por ID para acesso rápido
   const playerMap = {};
   for (const p of allPlayers) {
     playerMap[p.id] = p;
   }
+
+  const stopAct = stopPointerPropagationOnActions
+    ? (e) => {
+        e.stopPropagation();
+      }
+    : undefined;
 
   const playerIdsOrdered =
     team.status === 'waiting'
@@ -60,8 +70,14 @@ export default function TeamCard({
       <ul className="team-players">
         {playerIdsOrdered.map((pid) => {
           const player = playerMap[pid];
+          const filaN = playerFilaNumberById[pid];
           return (
             <li key={pid} className="team-player-item">
+              {filaN != null && (
+                <span className="team-player-fila-num" title="Posição na fila de jogadores">
+                  #{filaN}
+                </span>
+              )}
               {player ? player.name : `Jogador ${pid.slice(0, 8)}...`}
               {player && (
                 <span className="player-badge">
@@ -82,6 +98,7 @@ export default function TeamCard({
           <button
             type="button"
             className="btn btn-outline btn-sm team-edit-btn"
+            onPointerDown={stopAct}
             onClick={() => onEditTeam(team, label || 'Time')}
           >
             Editar
@@ -91,6 +108,7 @@ export default function TeamCard({
           <button
             type="button"
             className="btn btn-outline btn-sm team-block-btn"
+            onPointerDown={stopAct}
             onClick={() => onToggleBlock(team.id)}
           >
             {team.isBlocked ? 'Desbloquear time' : 'Bloquear time'}

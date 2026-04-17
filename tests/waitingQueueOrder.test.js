@@ -43,4 +43,17 @@ describe('sortWaitingTeamsForRound', () => {
     const sorted = sortWaitingTeamsForRound(teams, rid, players, 5);
     expect(sorted.map((t) => t.id)).toEqual(['fullA', 'fullB', 'solo']);
   });
+
+  it('waitingOrder vence menor joinedAt no mesmo grupo (reordenação manual)', () => {
+    const teams = [
+      mkTeam('late', ['p2'], { waitingOrder: 1 }),
+      mkTeam('early', ['p1'], { waitingOrder: 2 }),
+    ];
+    const players = [
+      mkPlayer('p1', '2020-01-01T00:00:00.000Z'),
+      mkPlayer('p2', '2020-06-01T00:00:00.000Z'),
+    ];
+    const sorted = sortWaitingTeamsForRound(teams, rid, players, null);
+    expect(sorted.map((t) => t.id)).toEqual(['late', 'early']);
+  });
 });

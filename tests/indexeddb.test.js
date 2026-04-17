@@ -16,9 +16,11 @@ import {
   addPlayer,
   getPlayers,
   updatePlayerName,
+  updatePlayerProfile,
   updateTeamDisplayName,
   updateTeamRoster,
   formTeam,
+  formAllTeamsPossible,
   formTeamsForRound,
   removePlayer,
   restorePlayerToAvailable,
@@ -28,6 +30,9 @@ import {
   scheduleMatch,
   updateScheduledMatchTeams,
   cancelScheduledMatch,
+  deleteMatch,
+  deletePlayerPermanently,
+  deleteTeam,
   bulkUpsertPlayerStats,
   listPlayerStatsForMatch,
   getMatchScoresForRound,
@@ -38,6 +43,9 @@ import {
   getActiveRoundId,
   finalizeMatch,
   getRoundStatistics,
+  getGlobalPlayerStatistics,
+  runDatastoreMaintenance,
+  reorderLinePlayersInQueueOrder,
 } from '../src/api/indexeddb.js';
 
 async function testRoundId() {
@@ -77,6 +85,73 @@ describe('addPlayer e getPlayers', () => {
     expect(players[0].name).toBe('Alice');
     expect(players[1].name).toBe('Bruno');
     expect(players[2].name).toBe('Carla');
+  });
+
+  it('reorderLinePlayersInQueueOrder inverte fila de linha e preserva slot do só-goleiro no merge', async () => {
+    await addPlayer('Alice');
+    await new Promise((r) => setTimeout(r, 5));
+    await addPlayer('Bruno');
+    await new Promise((r) => setTimeout(r, 5));
+    await addPlayer('Só GK', { goalkeeperOnly: true });
+
+    const before = await getPlayers(true);
+    expect(before.map((p) => p.name)).toEqual(['Alice', 'Bruno', 'Só GK']);
+
+    const line = before.filter((p) => !p.goalkeeperOnly);
+    await reorderLinePlayersInQueueOrder([line[1].id, line[0].id]);
+
+    const after = await getPlayers(true);
+    expect(after.map((p) => p.name)).toEqual(['Bruno', 'Alice', 'Só GK']);
+  });
+
+  it('removePlayer sem roundId remove jogador dos elencos (evita lesionado ainda no time)', async () => {
+    const rid = await testRoundId();
+    for (let i = 1; i <= 9; i += 1) {
+      await addPlayer(`Nr${i}`);
+      await new Promise((r) => setTimeout(r, 2));
+    }
+    await formTeam(3, rid);
+    await formTeam(3, rid);
+    await formTeam(3, rid);
+    const waiting = (await getTeams(rid)).find((t) => t.status === 'waiting');
+    expect(waiting).toBeDefined();
+    const vid = waiting.players[0];
+    await removePlayer(vid, 'injured', false, null, 3);
+    const teams = await getTeams(rid);
+    expect(teams.every((t) => !(t.players || []).includes(vid))).toBe(true);
+    expect((await getPlayers()).find((p) => p.id === vid).status).toBe('injured');
+  });
+
+  it('reorderLinePlayersInQueueOrder rejeita lista incompleta ou ID inválido', async () => {
+    await addPlayer('Um');
+    await addPlayer('Dois');
+    const [a, b] = await getPlayers(true);
+    await expect(reorderLinePlayersInQueueOrder([a.id])).rejects.toThrow(/quantidade/);
+    await expect(
+      reorderLinePlayersInQueueOrder([a.id, '00000000-0000-0000-0000-000000000000'])
+    ).rejects.toThrow(/fora da fila/);
+  });
+
+  it('deve atualizar perfil do jogador com flag de goleiro', async () => {
+    const player = await addPlayer('Goleiro');
+    await updatePlayerProfile(player.id, { name: 'Goleiro 1', preferGoalkeeper: true });
+    const players = await getPlayers();
+    const updated = players.find((p) => p.id === player.id);
+    expect(updated.name).toBe('Goleiro 1');
+    expect(updated.preferGoalkeeper).toBe(true);
+    expect(updated.goalkeeperOnly).toBeFalsy();
+  });
+
+  it('addPlayer com só goleiro não entra na formação automática', async () => {
+    const rid = await testRoundId();
+    const gk = await addPlayer('Só GK', { goalkeeperOnly: true });
+    for (let i = 1; i <= 5; i += 1) {
+      await addPlayer(`L${i}`);
+      await new Promise((r) => setTimeout(r, 3));
+    }
+    const team = await formTeam(5, rid);
+    expect(team.players).toHaveLength(5);
+    expect(team.players).not.toContain(gk.id);
   });
 });
 
@@ -228,6 +303,28 @@ describe('formTeam', () => {
 
     const mid = await formTeam(5, rid);
     expect(mid.status).toBe('waiting');
+  });
+});
+
+describe('formAllTeamsPossible', () => {
+  it('forma todos os times completos que a fila permite', async () => {
+    const rid = await testRoundId();
+    for (let i = 1; i <= 12; i += 1) {
+      await addPlayer(`P${i}`);
+      await new Promise((r) => setTimeout(r, 2));
+    }
+    const formed = await formAllTeamsPossible(3, rid);
+    expect(formed).toHaveLength(4);
+    const all = await getTeams(rid);
+    expect(all.filter((t) => t.roundId === rid)).toHaveLength(4);
+  });
+
+  it('propaga erro se nenhum time pode ser formado', async () => {
+    const rid = await testRoundId();
+    await addPlayer('A');
+    await expect(formAllTeamsPossible(5, rid)).rejects.toThrow(
+      'Jogadores insuficientes para formar um time de 5. Necessário: 5, disponível: 1.'
+    );
   });
 });
 
@@ -403,6 +500,63 @@ describe('removePlayer', () => {
     expect(waitingTeams[0].players.includes(j12.id)).toBe(false);
   });
 
+  it('lesão em jogador do próximo time (waiting): substitui e cascateia como em campo', async () => {
+    const rid = await testRoundId();
+    for (let i = 1; i <= 12; i += 1) {
+      await addPlayer(`P${i}`);
+      await new Promise((r) => setTimeout(r, 4));
+    }
+    await formTeam(3, rid);
+    await formTeam(3, rid);
+    await formTeam(3, rid);
+    const waitingTeams = (await getTeams(rid)).filter((t) => t.status === 'waiting');
+    expect(waitingTeams).toHaveLength(1);
+    const victimId = waitingTeams[0].players[0];
+    const { substituted } = await removePlayer(victimId, 'injured', false, rid, 3);
+    expect(substituted).toBe(true);
+    const teamsAfter = await getTeams(rid);
+    expect(teamsAfter.filter((t) => t.status === 'waiting').length).toBeGreaterThanOrEqual(1);
+    const victim = (await getPlayers()).find((p) => p.id === victimId);
+    expect(victim.status).toBe('injured');
+  });
+
+  it('lesão em waiting sem substituto: dissolve o time e libera o elenco', async () => {
+    const rid = await testRoundId();
+    for (let i = 1; i <= 9; i += 1) {
+      await addPlayer(`Q${i}`);
+      await new Promise((r) => setTimeout(r, 4));
+    }
+    await formTeam(3, rid);
+    await formTeam(3, rid);
+    await formTeam(3, rid);
+    const waiting = (await getTeams(rid)).find((t) => t.status === 'waiting');
+    expect(waiting).toBeDefined();
+    const victimId = waiting.players[0];
+    const { substituted } = await removePlayer(victimId, 'tired', false, rid, 3);
+    expect(substituted).toBe(false);
+    const teamsAfter = await getTeams(rid);
+    expect(teamsAfter.filter((t) => t.status === 'waiting')).toHaveLength(0);
+    const players = await getPlayers();
+    const teammates = waiting.players.filter((id) => id !== victimId);
+    for (const tid of teammates) {
+      expect(players.find((p) => p.id === tid).status).toBe('available');
+    }
+    expect(players.find((p) => p.id === victimId).status).toBe('tired');
+  });
+
+  it('fora de campo: lesionado/cansado vai para o fim da lista (joinedAt)', async () => {
+    await addPlayer('A');
+    await new Promise((r) => setTimeout(r, 5));
+    await addPlayer('B');
+    await new Promise((r) => setTimeout(r, 5));
+    await addPlayer('C');
+    const b = (await getPlayers(true)).find((p) => p.name === 'B');
+    await removePlayer(b.id, 'injured', false);
+    const after = await getPlayers(true);
+    expect(after[after.length - 1].name).toBe('B');
+    expect(after[after.length - 1].status).toBe('injured');
+  });
+
   it('restorePlayerToAvailable libera cansado/lesionado para o fim da fila', async () => {
     const rid = await testRoundId();
     await addPlayer('Alpha');
@@ -543,6 +697,13 @@ describe('partidas agendadas: updateScheduledMatchTeams e cancelScheduledMatch',
     expect(matches.find((m) => m.id === match.id)).toBeUndefined();
   });
 
+  it('deleteMatch remove partida agendada', async () => {
+    const { rid, t1, t2, match } = await setupThreeTeamsScheduled();
+    await deleteMatch(match.id);
+    const matches = await getMatches(rid);
+    expect(matches.find((m) => m.id === match.id)).toBeUndefined();
+  });
+
   it('getMatchScoresForRound inclui gols contra do adversário no placar', async () => {
     const { rid, t1, t2, match } = await setupThreeTeamsScheduled();
     await bulkUpsertPlayerStats(match.id, rid, [
@@ -566,6 +727,125 @@ describe('partidas agendadas: updateScheduledMatchTeams e cancelScheduledMatch',
     const scores = await getMatchScoresForRound(rid);
     expect(scores[match.id].scoreA).toBe(2);
     expect(scores[match.id].scoreB).toBe(0);
+  });
+});
+
+describe('exclusões permanentes (jogador, time, partida finalizada)', () => {
+  it('deletePlayerPermanently remove jogador, elenco e stats da partida', async () => {
+    const rid = await testRoundId();
+    for (let i = 1; i <= 11; i += 1) {
+      await addPlayer(`P${i}`);
+      await new Promise((r) => setTimeout(r, 2));
+    }
+    const t1 = await formTeam(5, rid);
+    const t2 = await formTeam(5, rid);
+    const match = await scheduleMatch(rid, t1.id, t2.id, { teamSize: 5 });
+    const victimId = t1.players[0];
+    await bulkUpsertPlayerStats(match.id, rid, [
+      {
+        playerId: victimId,
+        teamId: t1.id,
+        goals: 1,
+        assists: 0,
+        ownGoals: 0,
+        wasGoalkeeper: false,
+      },
+      {
+        playerId: t2.players[0],
+        teamId: t2.id,
+        goals: 0,
+        assists: 0,
+        ownGoals: 0,
+        wasGoalkeeper: false,
+      },
+    ]);
+    expect((await listPlayerStatsForMatch(match.id)).some((s) => s.playerId === victimId)).toBe(
+      true
+    );
+
+    await deletePlayerPermanently(victimId);
+    const players = await getPlayers();
+    expect(players.some((p) => p.id === victimId)).toBe(false);
+    const stats = await listPlayerStatsForMatch(match.id);
+    expect(stats.some((s) => s.playerId === victimId)).toBe(false);
+    const t1After = (await getTeams(rid)).find((t) => t.id === t1.id);
+    expect(t1After.players.includes(victimId)).toBe(false);
+  });
+
+  it('deleteTeam bloqueia se time está em partida', async () => {
+    const rid = await testRoundId();
+    for (let i = 1; i <= 15; i += 1) {
+      await addPlayer(`T${i}`);
+      await new Promise((r) => setTimeout(r, 2));
+    }
+    const t1 = await formTeam(5, rid);
+    const t2 = await formTeam(5, rid);
+    await formTeam(5, rid);
+    await scheduleMatch(rid, t1.id, t2.id, { teamSize: 5 });
+    await expect(deleteTeam(t1.id)).rejects.toThrow(/partida/i);
+  });
+
+  it('deleteTeam apaga time sem partida vinculada', async () => {
+    const rid = await testRoundId();
+    for (let i = 1; i <= 5; i += 1) {
+      await addPlayer(`X${i}`);
+      await new Promise((r) => setTimeout(r, 2));
+    }
+    const t = await formTeam(5, rid);
+    await deleteTeam(t.id);
+    const teams = await getTeams(rid);
+    expect(teams.find((x) => x.id === t.id)).toBeUndefined();
+  });
+
+  it('deleteTeam devolve elenco à fila (available) para poder formar de novo', async () => {
+    const rid = await testRoundId();
+    for (let i = 1; i <= 5; i += 1) {
+      await addPlayer(`Q${i}`);
+      await new Promise((r) => setTimeout(r, 2));
+    }
+    const t = await formTeam(5, rid);
+    const ids = [...t.players];
+    await deleteTeam(t.id);
+    const playersAfter = await getPlayers();
+    for (const id of ids) {
+      expect(playersAfter.find((x) => x.id === id)?.status).toBe('available');
+    }
+    await expect(formTeam(5, rid)).resolves.toMatchObject({ players: expect.any(Array) });
+  });
+
+  it('deleteMatch apaga partida finalizada e stats', async () => {
+    const rid = await testRoundId();
+    for (let i = 1; i <= 15; i += 1) {
+      await addPlayer(`F${i}`);
+      await new Promise((r) => setTimeout(r, 2));
+    }
+    const t1 = await formTeam(5, rid);
+    const t2 = await formTeam(5, rid);
+    await formTeam(5, rid);
+    const sched = await scheduleMatch(rid, t1.id, t2.id, { teamSize: 5 });
+    await bulkUpsertPlayerStats(sched.id, rid, [
+      {
+        playerId: t1.players[0],
+        teamId: t1.id,
+        goals: 2,
+        assists: 0,
+        ownGoals: 0,
+        wasGoalkeeper: false,
+      },
+      {
+        playerId: t2.players[0],
+        teamId: t2.id,
+        goals: 0,
+        assists: 0,
+        ownGoals: 0,
+        wasGoalkeeper: false,
+      },
+    ]);
+    await finalizeMatch(sched.id, 'A_win', { teamSize: 5 });
+    expect((await listPlayerStatsForMatch(sched.id)).length).toBeGreaterThan(0);
+    await deleteMatch(sched.id);
+    expect((await getMatches(rid)).find((m) => m.id === sched.id)).toBeUndefined();
+    expect(await listPlayerStatsForMatch(sched.id)).toHaveLength(0);
   });
 });
 
@@ -719,6 +999,24 @@ describe('goleiro externo', () => {
 });
 
 describe('recordMatch', () => {
+  it('perdedor volta à fila com joinedAt na ordem do elenco (FIFO estável)', async () => {
+    const rid = await testRoundId();
+    for (let i = 1; i <= 10; i += 1) {
+      await addPlayer(`P${i}`);
+      await new Promise((r) => setTimeout(r, 4));
+    }
+    const teamA = await formTeam(5, rid);
+    const teamB = await formTeam(5, rid);
+    const orderB = [...teamB.players];
+    await recordMatch(rid, teamA.id, teamB.id, 'A_win');
+    const players = await getPlayers(true);
+    const byId = Object.fromEntries(players.map((p) => [p.id, p]));
+    const times = orderB.map((id) => Date.parse(byId[id].joinedAt));
+    for (let i = 1; i < times.length; i += 1) {
+      expect(times[i]).toBeGreaterThan(times[i - 1]);
+    }
+  });
+
   async function setupTwoTeams() {
     const rid = await testRoundId();
     for (let i = 1; i <= 10; i++) {
@@ -854,6 +1152,212 @@ describe('exportData e importData', () => {
 
     const players = await getPlayers();
     expect(players).toHaveLength(3);
+  });
+});
+
+describe('estatísticas globais e manutenção', () => {
+  it('deve agregar vitórias/derrotas globais por jogador', async () => {
+    const rid = await testRoundId();
+    for (let i = 1; i <= 10; i += 1) {
+      await addPlayer(`G${i}`);
+      await new Promise((r) => setTimeout(r, 2));
+    }
+    const teamA = await formTeam(5, rid);
+    const teamB = await formTeam(5, rid);
+    const match = await scheduleMatch(rid, teamA.id, teamB.id, { teamSize: 5 });
+
+    await bulkUpsertPlayerStats(match.id, rid, [
+      {
+        teamId: teamA.id,
+        playerId: teamA.players[0],
+        goals: 1,
+        assists: 0,
+        ownGoals: 0,
+        wasGoalkeeper: false,
+      },
+      {
+        teamId: teamB.id,
+        playerId: teamB.players[0],
+        goals: 0,
+        assists: 0,
+        ownGoals: 0,
+        wasGoalkeeper: false,
+      },
+    ]);
+    await finalizeMatch(match.id, 'A_win', { teamSize: 5 });
+
+    const stats = await getGlobalPlayerStatistics();
+    const winner = stats.find((s) => s.playerId === teamA.players[0]);
+    const loser = stats.find((s) => s.playerId === teamB.players[0]);
+    expect(winner.wins).toBe(1);
+    expect(winner.losses).toBe(0);
+    expect(loser.losses).toBe(1);
+    expect(loser.wins).toBe(0);
+  });
+
+  it('deve remover player_stats órfãs e limpar ids de jogador inexistente em times', async () => {
+    const rid = await testRoundId();
+    const lone = await addPlayer('Lone');
+    const team = await formTeam(1, rid);
+    const fakePlayerId = crypto.randomUUID();
+
+    const db = await openDB();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(['player_stats', 'teams'], 'readwrite');
+      tx.objectStore('player_stats').add({
+        id: crypto.randomUUID(),
+        roundId: crypto.randomUUID(),
+        matchId: crypto.randomUUID(),
+        teamId: team.id,
+        playerId: lone.id,
+        goals: 1,
+        assists: 0,
+        ownGoals: 0,
+        wasGoalkeeper: false,
+      });
+      tx.objectStore('teams').put({ ...team, players: [lone.id, fakePlayerId] });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+
+    const summary = await runDatastoreMaintenance();
+    expect(summary.removedStats).toBe(1);
+    expect(summary.scrubbedTeamPlayerSlots).toBe(1);
+
+    const teams = await getTeams(rid);
+    expect(teams.find((t) => t.id === team.id).players).toEqual([lone.id]);
+  });
+
+  it('runDatastoreMaintenance recoloca jogadores in_field que não estão em nenhum time', async () => {
+    const rid = await testRoundId();
+    for (let i = 1; i <= 5; i += 1) {
+      await addPlayer(`G${i}`);
+      await new Promise((r) => setTimeout(r, 2));
+    }
+    const t = await formTeam(5, rid);
+    const rosterIds = [...t.players];
+    const db = await openDB();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('teams', 'readwrite');
+      tx.objectStore('teams').delete(t.id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    const summary = await runDatastoreMaintenance();
+    expect(summary.requeuedGhostInField).toBe(5);
+    const players = await getPlayers();
+    for (const id of rosterIds) {
+      expect(players.find((p) => p.id === id)?.status).toBe('available');
+    }
+  });
+
+  it('runDatastoreMaintenance retira lesionados do elenco de times em espera', async () => {
+    const rid = await testRoundId();
+    for (let i = 1; i <= 9; i += 1) {
+      await addPlayer(`Gc${i}`);
+      await new Promise((r) => setTimeout(r, 2));
+    }
+    await formTeam(3, rid);
+    await formTeam(3, rid);
+    await formTeam(3, rid);
+    const waiting = (await getTeams(rid)).find((t) => t.status === 'waiting');
+    expect(waiting).toBeDefined();
+    const hurtId = waiting.players[0];
+    const db = await openDB();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('players', 'readwrite');
+      const store = tx.objectStore('players');
+      const g = store.get(hurtId);
+      g.onsuccess = () => {
+        const p = g.result;
+        p.status = 'injured';
+        store.put(p);
+      };
+      g.onerror = () => reject(g.error);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+
+    const summary = await runDatastoreMaintenance();
+    expect(summary.scrubbedTeamPlayerSlots).toBeGreaterThanOrEqual(1);
+    const teamsAfter = await getTeams(rid);
+    const wAfter = teamsAfter.find((t) => t.id === waiting.id);
+    expect(wAfter.players).not.toContain(hurtId);
+  });
+});
+
+describe('stress flow: alta carga com fadiga e substituição', () => {
+  it('sustenta mais de 35 jogadores e mais de 20 partidas com churn de elenco', async () => {
+    const rid = await testRoundId();
+    const teamSize = 5;
+    const playerCount = 40;
+    const targetMatches = 22;
+
+    for (let i = 1; i <= playerCount; i += 1) {
+      await addPlayer(`StressP${i}`);
+    }
+
+    await formTeam(teamSize, rid);
+    await formTeam(teamSize, rid);
+
+    const churnMoments = [
+      { matchNo: 4, reason: 'tired' },
+      { matchNo: 8, reason: 'injured' },
+      { matchNo: 12, reason: 'tired' },
+      { matchNo: 16, reason: 'injured' },
+      { matchNo: 20, reason: 'tired' },
+    ];
+
+    let substitutions = 0;
+    const churnedPlayerIds = new Set();
+
+    for (let i = 1; i <= targetMatches; i += 1) {
+      let teams = await getTeams(rid);
+      let inField = teams.filter((t) => t.status === 'in_field');
+      while (inField.length < 2) {
+        await formTeam(teamSize, rid);
+        teams = await getTeams(rid);
+        inField = teams.filter((t) => t.status === 'in_field');
+      }
+      expect(inField.length).toBeGreaterThanOrEqual(2);
+
+      const match = await scheduleMatch(rid, inField[0].id, inField[1].id, { teamSize });
+      const result = i % 5 === 0 ? 'draw' : i % 2 === 0 ? 'B_win' : 'A_win';
+      await finalizeMatch(match.id, result, { teamSize });
+
+      const churn = churnMoments.find((c) => c.matchNo === i);
+      if (churn) {
+        let teamsAfterMatch = await getTeams(rid);
+        let inFieldAfterMatch = teamsAfterMatch.filter((t) => t.status === 'in_field');
+        while (inFieldAfterMatch.length < 2) {
+          await formTeam(teamSize, rid);
+          teamsAfterMatch = await getTeams(rid);
+          inFieldAfterMatch = teamsAfterMatch.filter((t) => t.status === 'in_field');
+        }
+
+        const players = await getPlayers(false);
+        const victim =
+          players.find(
+          (p) => p.status === 'in_field' && !churnedPlayerIds.has(p.id)
+          ) || players.find((p) => p.status === 'in_field');
+        expect(victim).toBeDefined();
+
+        const out = await removePlayer(victim.id, churn.reason, true, rid, teamSize);
+        expect(out.substituted).toBe(true);
+        substitutions += 1;
+        churnedPlayerIds.add(victim.id);
+      }
+    }
+
+    const matches = await getMatches(rid);
+    const finalized = matches.filter((m) => m.status === 'finalized');
+    expect(finalized.length).toBeGreaterThan(20);
+
+    const playersAfter = await getPlayers(false);
+    const tiredOrInjured = playersAfter.filter((p) => ['tired', 'injured'].includes(p.status));
+    expect(playersAfter).toHaveLength(playerCount);
+    expect(substitutions).toBeGreaterThanOrEqual(5);
+    expect(tiredOrInjured.length).toBeGreaterThanOrEqual(3);
   });
 });
 

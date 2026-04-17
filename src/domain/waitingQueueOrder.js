@@ -2,8 +2,8 @@
  * Ordem da fila de times `waiting`:
  * 1) Times com elenco completo (players.length >= rosterTargetSize) antes dos incompletos,
  *    quando rosterTargetSize é informado (ex.: mesmo “Jogadores por time” da UI).
- * 2) Entre o mesmo grupo: menor joinedAt no elenco (cabeça da fila global).
- * 3) Desempate: waitingOrder, enteredWaitingAt, id.
+ * 2) Entre o mesmo grupo: waitingOrder (menor primeiro; arrastar na UI grava 1..n).
+ * 3) Desempate: menor joinedAt no elenco (cabeça da fila global), enteredWaitingAt, id.
  */
 
 function waitingOrderRank(t) {
@@ -40,13 +40,13 @@ export function compareWaitingTeamsQueueOrder(
     if (aInc !== bInc) return aInc ? 1 : -1;
   }
 
-  const ea = earliestJoinedInTeamMs(a, playerById);
-  const eb = earliestJoinedInTeamMs(b, playerById);
-  if (ea !== eb) return ea - eb;
-
   const oa = waitingOrderRank(a);
   const ob = waitingOrderRank(b);
   if (oa !== ob) return oa - ob;
+
+  const ea = earliestJoinedInTeamMs(a, playerById);
+  const eb = earliestJoinedInTeamMs(b, playerById);
+  if (ea !== eb) return ea - eb;
 
   const ta = new Date(a.enteredWaitingAt || a.createdAt).getTime();
   const tb = new Date(b.enteredWaitingAt || b.createdAt).getTime();

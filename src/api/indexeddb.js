@@ -247,7 +247,7 @@ export async function getRound(roundId) {
 
 // ---------- Jogadores ----------
 
-export async function addPlayer(name) {
+export async function addPlayer(name, { goalkeeperOnly = false } = {}) {
   if (!name || typeof name !== 'string' || !name.trim()) {
     throw new Error('Nome do jogador é obrigatório.');
   }
@@ -263,6 +263,7 @@ export async function addPlayer(name) {
   }
 
   const db = await openDB();
+  const gkOnly = Boolean(goalkeeperOnly);
   const player = {
     id: crypto.randomUUID(),
     name: name.trim(),
@@ -270,6 +271,8 @@ export async function addPlayer(name) {
     joinedAt: new Date(joinedMs).toISOString(),
     goals: 0,
     assists: 0,
+    preferGoalkeeper: gkOnly,
+    goalkeeperOnly: gkOnly,
   };
 
   const tx = db.transaction('players', 'readwrite');
@@ -310,11 +313,19 @@ export async function getPlayers(orderByJoinedAt = true) {
   });
 }
 
-export async function updatePlayerName(playerId, name) {
-  if (!name || typeof name !== 'string' || !name.trim()) {
+export async function updatePlayerProfile(
+  playerId,
+  { name, preferGoalkeeper, goalkeeperOnly } = {}
+) {
+  const hasName = typeof name === 'string';
+  const hasPreferGoalkeeper = typeof preferGoalkeeper === 'boolean';
+  const hasGoalkeeperOnly = typeof goalkeeperOnly === 'boolean';
+  if (!hasName && !hasPreferGoalkeeper && !hasGoalkeeperOnly) {
+    throw new Error('Nada para atualizar no jogador.');
+  }
+  if (hasName && !name.trim()) {
     throw new Error('Nome do jogador é obrigatório.');
   }
-  const trimmed = name.trim();
   const db = await openDB();
   const tx = db.transaction('players', 'readwrite');
   const store = tx.objectStore('players');
@@ -327,12 +338,108 @@ export async function updatePlayerName(playerId, name) {
         reject(new Error('Jogador não encontrado.'));
         return;
       }
-      p.name = trimmed;
+      if (hasName) p.name = name.trim();
+      if (hasGoalkeeperOnly) {
+        p.goalkeeperOnly = goalkeeperOnly;
+        if (goalkeeperOnly) p.preferGoalkeeper = true;
+      } else if (hasPreferGoalkeeper && !p.goalkeeperOnly) {
+        p.preferGoalkeeper = preferGoalkeeper;
+      }
       store.put(p);
     };
     g.onerror = () => reject(g.error);
     tx.oncomplete = () => {
       notifyChange('player_updated');
+      resolve();
+    };
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+export async function updatePlayerName(playerId, name) {
+  return updatePlayerProfile(playerId, { name });
+}
+
+/**
+ * Persist nova ordem da fila (aba "Fila de Jogadores", sem só-goleiro).
+ * Reescreve joinedAt em sequência preservando posições relativas dos cadastros só-goleiro
+ * na ordenação global.
+ *
+ * @param {string[]} newLinePlayerIdsInOrder — IDs na ordem desejada (mesmo conjunto que getPlayers filtrado !goalkeeperOnly)
+ */
+/**
+ * Persiste ordem manual da fila de times `waiting` (waitingOrder 1..n).
+ * @param {string} roundId
+ * @param {string[]} orderedWaitingTeamIds — permutação dos times waiting da rodada
+ */
+export async function reorderWaitingTeamsInRound(roundId, orderedWaitingTeamIds) {
+  if (!roundId) throw new Error('Rodada obrigatória.');
+  const roundTeams = await getTeams(roundId);
+  const waiting = roundTeams.filter((t) => t.status === 'waiting');
+  if (orderedWaitingTeamIds.length !== waiting.length) {
+    throw new Error('Lista de times não confere com a fila de espera.');
+  }
+  const idSet = new Set(waiting.map((t) => t.id));
+  for (const id of orderedWaitingTeamIds) {
+    if (!idSet.has(id)) {
+      throw new Error('Time inválido na reordenação.');
+    }
+  }
+  const byId = Object.fromEntries(waiting.map((t) => [t.id, t]));
+  const db = await openDB();
+  const tx = db.transaction('teams', 'readwrite');
+  const store = tx.objectStore('teams');
+  orderedWaitingTeamIds.forEach((id, i) => {
+    const t = byId[id];
+    store.put({ ...t, waitingOrder: i + 1 });
+  });
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => {
+      notifyChange('waiting_teams_reordered');
+      resolve();
+    };
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+export async function reorderLinePlayersInQueueOrder(newLinePlayerIdsInOrder) {
+  const all = await getPlayers(true);
+  const linePlayers = all.filter((p) => !p.goalkeeperOnly);
+  const lineIdSet = new Set(linePlayers.map((p) => p.id));
+  if (newLinePlayerIdsInOrder.length !== lineIdSet.size) {
+    throw new Error('Ordem da fila inválida: quantidade de jogadores de linha não confere.');
+  }
+  for (const id of newLinePlayerIdsInOrder) {
+    if (!lineIdSet.has(id)) {
+      throw new Error('Ordem da fila inválida: ID fora da fila de linha.');
+    }
+  }
+  let u = 0;
+  const mergedIds = [];
+  for (const p of all) {
+    if (p.goalkeeperOnly) mergedIds.push(p.id);
+    else mergedIds.push(newLinePlayerIdsInOrder[u++]);
+  }
+
+  let baseMs = Infinity;
+  for (const p of all) {
+    const t = Date.parse(p.joinedAt);
+    if (!Number.isNaN(t)) baseMs = Math.min(baseMs, t);
+  }
+  if (!Number.isFinite(baseMs)) baseMs = Date.now();
+
+  const byId = Object.fromEntries(all.map((p) => [p.id, p]));
+  const db = await openDB();
+  const tx = db.transaction('players', 'readwrite');
+  const store = tx.objectStore('players');
+  mergedIds.forEach((id, i) => {
+    const p = byId[id];
+    store.put({ ...p, joinedAt: new Date(baseMs + i).toISOString() });
+  });
+
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => {
+      notifyChange('players_queue_reordered');
       resolve();
     };
     tx.onerror = () => reject(tx.error);
@@ -379,6 +486,64 @@ function sortPlayersByJoinedAtThenId(a, b) {
   return String(a.id).localeCompare(String(b.id));
 }
 
+function maxJoinedAtMsFromPlayerMap(playerMap) {
+  let maxMs = 0;
+  for (const p of Object.values(playerMap)) {
+    if (!p?.joinedAt) continue;
+    const t = Date.parse(p.joinedAt);
+    if (!Number.isNaN(t)) maxMs = Math.max(maxMs, t);
+  }
+  return maxMs;
+}
+
+/** Próximo slot temporal depois do fim atual da fila (joinedAt). */
+function nextRequeueSlotMs(playerMap) {
+  return Math.max(Date.now(), maxJoinedAtMsFromPlayerMap(playerMap) + 1);
+}
+
+/** joinedAt ISO no fim da fila global; exclui um jogador do cálculo (ex.: vítima). */
+function joinedAtIsoEndOfQueueExcluding(playerMap, excludePlayerId) {
+  const filtered = {};
+  const ex = String(excludePlayerId);
+  for (const [k, v] of Object.entries(playerMap)) {
+    if (String(k) !== ex) filtered[k] = v;
+  }
+  return new Date(nextRequeueSlotMs(filtered)).toISOString();
+}
+
+/**
+ * Volta jogadores ao fim da fila global preservando ordem do array (1 ms entre cada).
+ * @returns {number} próximo ms livre após o último atribuído
+ */
+function rejoinPlayersToQueuePreservingOrder(playerMap, playerIdsInOrder, startSlotMs) {
+  let slot = startSlotMs;
+  for (const pid of playerIdsInOrder || []) {
+    const p = playerMap[pid];
+    if (!p) continue;
+    p.status = 'available';
+    p.joinedAt = new Date(slot).toISOString();
+    slot += 1;
+  }
+  return slot;
+}
+
+/** Só atualiza joinedAt em ordem (ex.: elenco in_field). */
+function stampJoinedAtStagger(playerMap, playerIdsInOrder, startSlotMs) {
+  let slot = startSlotMs;
+  for (const pid of playerIdsInOrder || []) {
+    const p = playerMap[pid];
+    if (!p) continue;
+    p.joinedAt = new Date(slot).toISOString();
+    slot += 1;
+  }
+  return slot;
+}
+
+/** Só goleiro: fora da fila de linha e da formação automática / substituição em campo. */
+function isGoalkeeperOnlyPlayer(p) {
+  return Boolean(p?.goalkeeperOnly);
+}
+
 function sortRosterIdsByJoinedAt(ids, playerById) {
   return [...(ids || [])].sort((pa, pb) => {
     const a = playerById[String(pa)] ?? playerById[pa];
@@ -402,7 +567,7 @@ function pickFirstAvailableFromRoster(orderedIdsAsc, playerById) {
   for (let i = 0; i < orderedIdsAsc.length; i += 1) {
     const pid = orderedIdsAsc[i];
     const p = playerById[String(pid)] ?? playerById[pid];
-    if (p && isStatusAvailable(p.status)) return pid;
+    if (p && isStatusAvailable(p.status) && !isGoalkeeperOnlyPlayer(p)) return pid;
   }
   return null;
 }
@@ -412,6 +577,7 @@ function pickFirstAvailableFromRoster(orderedIdsAsc, playerById) {
  * Aceita status legado vazio; rejeita lesionado/cansado/em campo.
  */
 function canFillWaitingFromBench(p) {
+  if (isGoalkeeperOnlyPlayer(p)) return false;
   const s = p?.status;
   if (s === 'in_field' || s === 'injured' || s === 'tired') return false;
   if (isStatusAvailable(s)) return true;
@@ -606,6 +772,7 @@ export async function formTeam(size, roundId) {
 
             const formationPool = mutablePlayers
               .filter((p) => {
+                if (isGoalkeeperOnlyPlayer(p)) return false;
                 if (p.status !== 'available' || isOnInFieldRoster(p.id)) return false;
                 if (asWaiting && isOnCompleteWaitingRoster(p.id)) return false;
                 return true;
@@ -701,6 +868,35 @@ export async function formTeam(size, roundId) {
   });
 }
 
+function isFormTeamQueueExhaustedError(err) {
+  const msg = err?.message || '';
+  return (
+    msg.includes('Jogadores insuficientes para formar um time') ||
+    msg.includes('Nenhum jogador disponível na fila')
+  );
+}
+
+/**
+ * Chama `formTeam` em sequência até não haver jogadores suficientes para mais um time completo.
+ * @returns {Promise<Array<object>>} times criados (pode ser vazio só se o primeiro `formTeam` falhar)
+ */
+export async function formAllTeamsPossible(size, roundId) {
+  const created = [];
+  let lastErr = null;
+  for (;;) {
+    try {
+      const team = await formTeam(size, roundId);
+      created.push(team);
+    } catch (err) {
+      lastErr = err;
+      if (isFormTeamQueueExhaustedError(err)) break;
+      throw err;
+    }
+  }
+  if (created.length === 0 && lastErr) throw lastErr;
+  return created;
+}
+
 /**
  * Forma vários times de uma vez (mesma transação).
  */
@@ -731,9 +927,9 @@ export async function formTeamsForRound(roundId, playersPerTeam, teamCount) {
 
       cursorReq.onsuccess = (event) => {
         const cursor = event.target.result;
-        if (cursor && selected.length < need) {
+          if (cursor && selected.length < need) {
           const player = cursor.value;
-          if (player.status === 'available') {
+          if (player.status === 'available' && !isGoalkeeperOnlyPlayer(player)) {
             selected.push(player.id);
           }
           cursor.continue();
@@ -1086,6 +1282,270 @@ export async function updateTeamRoster(teamId, nextPlayerIds, roundId, options =
   });
 }
 
+/**
+ * Remove jogador do banco: tira de todos os elencos, apaga player_stats dele, apaga times vazios.
+ */
+export async function deletePlayerPermanently(playerId) {
+  const db = await openDB();
+  const tx = db.transaction(['players', 'teams', 'player_stats'], 'readwrite');
+  const playersStore = tx.objectStore('players');
+  const teamsStore = tx.objectStore('teams');
+  const statsStore = tx.objectStore('player_stats');
+  const idStr = String(playerId);
+
+  return new Promise((resolve, reject) => {
+    const pReq = playersStore.get(playerId);
+    pReq.onsuccess = () => {
+      if (!pReq.result) {
+        tx.abort();
+        reject(new Error('Jogador não encontrado.'));
+        return;
+      }
+
+      const teamsReq = teamsStore.getAll();
+      teamsReq.onsuccess = () => {
+        const allTeams = teamsReq.result || [];
+        for (const t of allTeams) {
+          const orig = t.players || [];
+          const next = orig.filter((pid) => String(pid) !== idStr);
+          if (next.length === orig.length) continue;
+          if (next.length === 0) {
+            teamsStore.delete(t.id);
+          } else {
+            teamsStore.put({ ...t, players: next });
+          }
+        }
+
+        const statsReq = statsStore.getAll();
+        statsReq.onsuccess = () => {
+          for (const row of statsReq.result || []) {
+            if (String(row.playerId) === idStr) {
+              statsStore.delete(row.id);
+            }
+          }
+          playersStore.delete(playerId);
+          tx.oncomplete = () => {
+            notifyChange('player_deleted');
+            resolve();
+          };
+        };
+        statsReq.onerror = () => reject(statsReq.error);
+      };
+      teamsReq.onerror = () => reject(teamsReq.error);
+    };
+    pReq.onerror = () => reject(pReq.error);
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || new Error('Transação abortada.'));
+  });
+}
+
+/**
+ * Apaga time se não houver partida (qualquer status) referenciando teamA/teamB.
+ * Jogadores do elenco voltam à fila (`available` + joinedAt), como em dissolver time após partida.
+ */
+export async function deleteTeam(teamId) {
+  const db = await openDB();
+  const readTx = db.transaction('matches', 'readonly');
+  const matches = await promisify(readTx.objectStore('matches').getAll());
+  for (const m of matches || []) {
+    if (m.teamA === teamId || m.teamB === teamId) {
+      throw new Error(
+        'Este time está em uma partida. Cancele ou exclua a partida antes de excluir o time.'
+      );
+    }
+  }
+
+  const writeTx = db.transaction(['teams', 'players'], 'readwrite');
+  const teamsStore = writeTx.objectStore('teams');
+  const playersStore = writeTx.objectStore('players');
+  return new Promise((resolve, reject) => {
+    const tReq = teamsStore.get(teamId);
+    tReq.onsuccess = () => {
+      const team = tReq.result;
+      if (!team) {
+        writeTx.abort();
+        reject(new Error('Time não encontrado.'));
+        return;
+      }
+      const roster = team.players || [];
+      const pAll = playersStore.getAll();
+      pAll.onsuccess = () => {
+        const raw = pAll.result || [];
+        const playerMap = Object.fromEntries(raw.map((p) => [p.id, { ...p }]));
+        const startSlot = nextRequeueSlotMs(playerMap);
+        rejoinPlayersToQueuePreservingOrder(playerMap, roster, startSlot);
+        for (const pid of roster) {
+          const p = playerMap[pid];
+          if (p) playersStore.put(p);
+        }
+        teamsStore.delete(teamId);
+        writeTx.oncomplete = () => {
+          notifyChange('team_deleted');
+          resolve();
+        };
+      };
+      pAll.onerror = () => reject(pAll.error);
+    };
+    tReq.onerror = () => reject(tReq.error);
+    writeTx.onerror = () => reject(writeTx.error);
+    writeTx.onabort = () => reject(writeTx.error || new Error('Transação abortada.'));
+  });
+}
+
+/** Remove jogador de todos os elencos na transação atual. Times com elenco vazio são apagados. */
+function stripPlayerIdFromAllTeamsInTx(teamsStore, victimIdStr, onDone, onErr) {
+  const req = teamsStore.getAll();
+  req.onsuccess = () => {
+    const ex = String(victimIdStr);
+    for (const t of req.result || []) {
+      const pl = t.players || [];
+      if (!pl.some((pid) => String(pid) === ex)) continue;
+      const filtered = pl.filter((pid) => String(pid) !== ex);
+      if (filtered.length === 0) teamsStore.delete(t.id);
+      else teamsStore.put({ ...t, players: filtered });
+    }
+    onDone();
+  };
+  req.onerror = () => onErr(req.error);
+}
+
+/**
+ * Dissolve elenco de um time `waiting`: jogadores voltam à fila com joinedAt preservando ordem.
+ */
+function dissolveWaitingTeamRosterIntoQueue(team, playerMap, playersStore) {
+  const ids = [...(team.players || [])];
+  if (ids.length === 0) return;
+  const idSet = new Set(ids.map((x) => String(x)));
+  const othersMap = Object.fromEntries(
+    Object.entries(playerMap).filter(([k]) => !idSet.has(String(k)))
+  );
+  let slot = nextRequeueSlotMs(othersMap);
+  rejoinPlayersToQueuePreservingOrder(playerMap, ids, slot);
+  for (const pid of ids) {
+    const p = playerMap[String(pid)];
+    if (p) playersStore.put(p);
+  }
+  team.players = [];
+}
+
+function persistWaitingTeamsAfterMutation(waitingSorted, teamsStore) {
+  for (const t of waitingSorted) {
+    if ((t.players || []).length === 0) teamsStore.delete(t.id);
+    else teamsStore.put(t);
+  }
+}
+
+/**
+ * Lesão/cansaço em jogador que está no elenco de um time `waiting` (status available).
+ * Mesma ideia que em campo: substituto do próximo waiting ou da fila global; cascata na fila.
+ * Sem substituto: dissolve o time (elenco volta disponível). Se após operação o time ainda
+ * ficar com menos de `rosterTargetSize` jogadores, dissolve o time.
+ * @returns {'cascade'|'dissolved'}
+ */
+function applyInjuryOnWaitingTeamRoster({
+  victimIdStr,
+  reason,
+  waitingSorted,
+  teamIndex: k,
+  allTeams,
+  roundId,
+  rosterTargetSize,
+  playerMap,
+  allPlayers,
+  nowIso,
+  playersStore,
+  teamsStore,
+}) {
+  const W = waitingSorted;
+  const T = W[k];
+  const victim = playerMap[victimIdStr];
+  if (!T || !victim) throw new Error('Time ou jogador inconsistente na fila de espera.');
+
+  T.players = (T.players || []).filter((id) => String(id) !== victimIdStr);
+  victim.status = reason;
+  victim.joinedAt = joinedAtIsoEndOfQueueExcluding(playerMap, victimIdStr);
+  playersStore.put(victim);
+
+  let subId = null;
+  if (k < W.length - 1) {
+    const donor = W[k + 1];
+    const ordered = sortRosterIdsByJoinedAt(donor.players || [], playerMap);
+    subId = pickFirstAvailableFromRoster(ordered, playerMap);
+  }
+  if (!subId) {
+    const onRoster = rosterPlayerIdsSetForRound(allTeams, roundId);
+    const freeCandidates = allPlayers
+      .filter(
+        (p) =>
+          canFillWaitingFromBench(p) &&
+          !onRoster.has(String(p.id)) &&
+          String(p.id) !== victimIdStr
+      )
+      .sort(sortPlayersByJoinedAtThenId);
+    subId = freeCandidates[0] ? freeCandidates[0].id : null;
+  }
+
+  if (!subId) {
+    dissolveWaitingTeamRosterIntoQueue(T, playerMap, playersStore);
+    teamsStore.delete(T.id);
+    persistWaitingTeamsAfterMutation(W, teamsStore);
+    return 'dissolved';
+  }
+
+  if (k < W.length - 1) {
+    const donor = W[k + 1];
+    donor.players = (donor.players || []).filter((id) => String(id) !== String(subId));
+    T.players = [...(T.players || []), subId];
+  } else {
+    T.players = [...(T.players || []), subId];
+  }
+
+  for (let i = k + 1; i < W.length - 1; i += 1) {
+    const recipient = W[i];
+    const donor = W[i + 1];
+    const orderedDonor = sortRosterIdsByJoinedAt(donor.players || [], playerMap);
+    const moved = pickFirstAvailableFromRoster(orderedDonor, playerMap);
+    if (!moved) {
+      throw new Error(
+        'Cascata (espera): não há jogador disponível no time seguinte da fila para subir o elenco.'
+      );
+    }
+    donor.players = donor.players.filter((id) => String(id) !== String(moved));
+    recipient.players = [...(recipient.players || []), moved];
+  }
+
+  const last = W[W.length - 1];
+  const onRosterAfter = rosterPlayerIdsSetForRound(allTeams, roundId);
+  const freeCandidates = allPlayers
+    .filter((p) => canFillWaitingFromBench(p) && !onRosterAfter.has(String(p.id)))
+    .sort(sortPlayersByJoinedAtThenId);
+  const freePick = freeCandidates[0];
+  if (!freePick) {
+    for (const pid of last.players || []) {
+      const p = playerMap[String(pid)];
+      if (p) {
+        p.status = 'available';
+        p.joinedAt = nowIso;
+        playersStore.put(p);
+      }
+    }
+    last.players = [];
+    teamsStore.delete(last.id);
+  } else {
+    last.players = [...(last.players || []), freePick.id];
+  }
+
+  if ((T.players || []).length > 0 && T.players.length < rosterTargetSize) {
+    dissolveWaitingTeamRosterIntoQueue(T, playerMap, playersStore);
+    teamsStore.delete(T.id);
+    persistWaitingTeamsAfterMutation(W, teamsStore);
+    return 'dissolved';
+  }
+
+  persistWaitingTeamsAfterMutation(W, teamsStore);
+  return 'cascade';
+}
+
 // ---------- removePlayer ----------
 
 /**
@@ -1095,6 +1555,8 @@ export async function updateTeamRoster(teamId, nextPlayerIds, roundId, options =
  * o último waiting recebe o próximo `available` que não está em nenhum elenco da rodada; se não
  * houver ninguém na fila global, o último time waiting é dissolvido (elenco volta à fila).
  * Se não houver time `waiting`, mas houver jogador na fila global fora de elenco, entra esse jogador direto no time em campo (sem cascata na fila de times).
+ * Se estiver no elenco de um time `waiting` (jogador ainda `available`), aplica substituição/cascata
+ * como na fila de espera após saída em campo; sem substituto ou elenco abaixo do mínimo, dissolve o time.
  * `substitute` mantido por compatibilidade; em campo a substituição é sempre tentada.
  * @param {number} [rosterTargetSize] — alinhado ao “Jogadores por time” da UI (ordem da fila waiting).
  * @returns {Promise<{ substituted: boolean }>}
@@ -1145,9 +1607,79 @@ export async function removePlayer(
       const previousStatus = player.status;
 
       if (previousStatus !== 'in_field') {
-        player.status = reason;
-        playersStore.put(player);
-        finishNoSub();
+        const victimIdStr = String(playerId);
+        if (!roundId) {
+          const allReq = playersStore.getAll();
+          allReq.onsuccess = () => {
+            const allPl = allReq.result || [];
+            const pmap = Object.fromEntries(allPl.map((p) => [String(p.id), p]));
+            const vp = pmap[victimIdStr];
+            vp.status = reason;
+            vp.joinedAt = joinedAtIsoEndOfQueueExcluding(pmap, vp.id);
+            playersStore.put(vp);
+            stripPlayerIdFromAllTeamsInTx(teamsStore, victimIdStr, finishNoSub, reject);
+          };
+          allReq.onerror = () => reject(allReq.error);
+          return;
+        }
+
+        const teamsEarlyReq = teamsStore.getAll();
+        teamsEarlyReq.onsuccess = () => {
+          const allTeamsEarly = teamsEarlyReq.result || [];
+          const playersEarlyReq = playersStore.getAll();
+          playersEarlyReq.onsuccess = () => {
+            const allPl = playersEarlyReq.result || [];
+            const pmap = Object.fromEntries(allPl.map((p) => [String(p.id), p]));
+            const vp = pmap[victimIdStr];
+            if (!vp) {
+              tx.abort();
+              reject(new Error('Jogador não encontrado.'));
+              return;
+            }
+
+            const waitingSortedEarly = sortWaitingTeamsForRound(
+              allTeamsEarly,
+              roundId,
+              allPl,
+              rosterTargetSize
+            );
+            const kWait = waitingSortedEarly.findIndex((t) =>
+              (t.players || []).some((pid) => String(pid) === victimIdStr)
+            );
+
+            if (kWait < 0) {
+              vp.status = reason;
+              vp.joinedAt = joinedAtIsoEndOfQueueExcluding(pmap, vp.id);
+              playersStore.put(vp);
+              stripPlayerIdFromAllTeamsInTx(teamsStore, victimIdStr, finishNoSub, reject);
+              return;
+            }
+
+            try {
+              const outcome = applyInjuryOnWaitingTeamRoster({
+                victimIdStr,
+                reason,
+                waitingSorted: waitingSortedEarly,
+                teamIndex: kWait,
+                allTeams: allTeamsEarly,
+                roundId,
+                rosterTargetSize,
+                playerMap: pmap,
+                allPlayers: allPl,
+                nowIso,
+                playersStore,
+                teamsStore,
+              });
+              if (outcome === 'cascade') finishSub();
+              else finishNoSub();
+            } catch (err) {
+              tx.abort();
+              reject(err);
+            }
+          };
+          playersEarlyReq.onerror = () => reject(playersEarlyReq.error);
+        };
+        teamsEarlyReq.onerror = () => reject(teamsEarlyReq.error);
         return;
       }
 
@@ -1169,6 +1701,7 @@ export async function removePlayer(
 
           if (!fieldTeam) {
             player.status = reason;
+            player.joinedAt = joinedAtIsoEndOfQueueExcluding(playerMap, player.id);
             playersStore.put(player);
             finishNoSub();
             return;
@@ -1262,6 +1795,7 @@ export async function removePlayer(
           teamsStore.put(fieldTeam);
 
           player.status = reason;
+          player.joinedAt = joinedAtIsoEndOfQueueExcluding(playerMap, player.id);
           playersStore.put(player);
 
           for (const t of waitingSorted) {
@@ -1342,6 +1876,78 @@ export async function getMatchById(matchId) {
   return promisify(db.transaction('matches', 'readonly').objectStore('matches').get(matchId));
 }
 
+export const SCHEDULED_MATCH_TIMER_MIN_MINUTES = 1;
+export const SCHEDULED_MATCH_TIMER_MAX_MINUTES = 180;
+
+const DEFAULT_SCHEDULED_MATCH_TIMER_MINUTES = 10;
+
+async function putMatchRow(match) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('matches', 'readwrite');
+    tx.objectStore('matches').put(match);
+    tx.oncomplete = () => {
+      notifyChange('match_timer_updated');
+      resolve();
+    };
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+/**
+ * Define duração do cronômetro (minutos) em partida agendada. Não permitido com countdown ativo.
+ */
+export async function setScheduledMatchTimerDuration(matchId, minutes) {
+  const m = Math.round(Number(minutes));
+  if (
+    !Number.isFinite(m) ||
+    m < SCHEDULED_MATCH_TIMER_MIN_MINUTES ||
+    m > SCHEDULED_MATCH_TIMER_MAX_MINUTES
+  ) {
+    throw new Error(
+      `Duração deve ser entre ${SCHEDULED_MATCH_TIMER_MIN_MINUTES} e ${SCHEDULED_MATCH_TIMER_MAX_MINUTES} minutos.`
+    );
+  }
+  const match = await getMatchById(matchId);
+  if (!match || match.status !== 'scheduled') {
+    throw new Error('Partida agendada não encontrada.');
+  }
+  if (match.countdownEndsAt) {
+    throw new Error('Pare o cronômetro (Zerar) para alterar a duração.');
+  }
+  await putMatchRow({ ...match, timerDurationMinutes: m });
+}
+
+/**
+ * Inicia contagem regressiva a partir de timerDurationMinutes (padrão 10 se ausente).
+ */
+export async function startScheduledMatchCountdown(matchId) {
+  const match = await getMatchById(matchId);
+  if (!match || match.status !== 'scheduled') {
+    throw new Error('Partida agendada não encontrada.');
+  }
+  const minsRaw = match.timerDurationMinutes ?? DEFAULT_SCHEDULED_MATCH_TIMER_MINUTES;
+  const mins = Math.round(Number(minsRaw));
+  if (
+    !Number.isFinite(mins) ||
+    mins < SCHEDULED_MATCH_TIMER_MIN_MINUTES ||
+    mins > SCHEDULED_MATCH_TIMER_MAX_MINUTES
+  ) {
+    throw new Error('Defina uma duração válida antes de iniciar.');
+  }
+  const countdownEndsAt = new Date(Date.now() + mins * 60 * 1000).toISOString();
+  await putMatchRow({ ...match, timerDurationMinutes: mins, countdownEndsAt });
+}
+
+/** Para o cronômetro sem alterar a duração configurada. */
+export async function clearScheduledMatchCountdown(matchId) {
+  const match = await getMatchById(matchId);
+  if (!match || match.status !== 'scheduled') {
+    throw new Error('Partida agendada não encontrada.');
+  }
+  await putMatchRow({ ...match, countdownEndsAt: null });
+}
+
 /** Soma gols + gols contra do adversário em player_stats (placar na lista de partidas). */
 export async function getMatchScoresForRound(roundId) {
   const matches = await getMatches(roundId);
@@ -1392,6 +1998,8 @@ function addScheduledMatchInStore(matchesStore, roundId, teamAId, teamBId, times
     draw: false,
     winningTeamId: null,
     timestamp,
+    timerDurationMinutes: DEFAULT_SCHEDULED_MATCH_TIMER_MINUTES,
+    countdownEndsAt: null,
   });
 }
 
@@ -1475,11 +2083,12 @@ export async function applyPostMatchSchedule(roundId, finalizedMatch, result, op
             win.status = 'in_field';
             stripWaitingQueueFields(win);
             teamsStore.put(win);
+            const mergeStart = nextRequeueSlotMs(playerMap);
+            stampJoinedAtStagger(playerMap, plan.mergedPlayerIds, mergeStart);
             for (const pid of wt.players) {
               const p = playerMap[pid];
               if (p) {
                 p.status = 'in_field';
-                p.joinedAt = now;
                 playersStore.put(p);
               }
             }
@@ -1493,20 +2102,13 @@ export async function applyPostMatchSchedule(roundId, finalizedMatch, result, op
                 : plan.match.teamA;
             const wT = byTeam[plan.tiebreakerWinnerTeamId];
             const lT = byTeam[loserTeamId];
-            const earlier = new Date(Date.now() - 3_600_000).toISOString();
-            for (const pid of wT.players || []) {
+            const earlierMs = Date.now() - 3_600_000;
+            let slotAfterWinners = stampJoinedAtStagger(playerMap, wT.players || [], earlierMs);
+            slotAfterWinners = Math.max(slotAfterWinners, Date.now());
+            stampJoinedAtStagger(playerMap, lT.players || [], slotAfterWinners);
+            for (const pid of [...(wT.players || []), ...(lT.players || [])]) {
               const p = playerMap[pid];
-              if (p) {
-                p.joinedAt = earlier;
-                playersStore.put(p);
-              }
-            }
-            for (const pid of lT.players || []) {
-              const p = playerMap[pid];
-              if (p) {
-                p.joinedAt = now;
-                playersStore.put(p);
-              }
+              if (p) playersStore.put(p);
             }
             const newTeam = {
               id: crypto.randomUUID(),
@@ -1596,25 +2198,25 @@ export async function recordMatch(roundId, teamAId, teamBId, result) {
         allP.onsuccess = () => {
           const playerMap = Object.fromEntries(allP.result.map((p) => [p.id, { ...p }]));
 
-          const dissolveTeamToPlayerQueue = (team) => {
-            if (!team) return;
-            for (const pid of team.players || []) {
-              const p = playerMap[pid];
-              if (p) {
-                p.status = 'available';
-                p.joinedAt = now;
-              }
-            }
+          const dissolveTeamToPlayerQueue = (team, startSlotMs) => {
+            if (!team) return startSlotMs;
+            const nextSlot = rejoinPlayersToQueuePreservingOrder(
+              playerMap,
+              team.players || [],
+              startSlotMs
+            );
             teamsStore.delete(team.id);
+            return nextSlot;
           };
 
+          let requeueSlot = nextRequeueSlotMs(playerMap);
           if (result === 'A_win') {
-            dissolveTeamToPlayerQueue(teamB);
+            requeueSlot = dissolveTeamToPlayerQueue(teamB, requeueSlot);
           } else if (result === 'B_win') {
-            dissolveTeamToPlayerQueue(teamA);
+            requeueSlot = dissolveTeamToPlayerQueue(teamA, requeueSlot);
           } else {
-            dissolveTeamToPlayerQueue(teamA);
-            dissolveTeamToPlayerQueue(teamB);
+            requeueSlot = dissolveTeamToPlayerQueue(teamA, requeueSlot);
+            requeueSlot = dissolveTeamToPlayerQueue(teamB, requeueSlot);
           }
 
           for (const p of Object.values(playerMap)) {
@@ -1696,6 +2298,8 @@ export async function scheduleMatch(roundId, teamAId, teamBId, options = {}) {
           draw: false,
           winningTeamId: null,
           timestamp: now,
+          timerDurationMinutes: DEFAULT_SCHEDULED_MATCH_TIMER_MINUTES,
+          countdownEndsAt: null,
         };
         matchesStore.add(match);
         tx.oncomplete = () => {
@@ -1765,28 +2369,28 @@ export async function finalizeMatch(matchId, result, options = {}) {
           allP.onsuccess = () => {
             const playerMap = Object.fromEntries(allP.result.map((p) => [p.id, { ...p }]));
 
-            const dissolveTeamToPlayerQueue = (team) => {
-              if (!team) return;
-              for (const pid of team.players || []) {
-                const pl = playerMap[pid];
-                if (pl) {
-                  pl.status = 'available';
-                  pl.joinedAt = now;
-                }
-              }
+            const dissolveTeamToPlayerQueue = (team, startSlotMs) => {
+              if (!team) return startSlotMs;
+              const nextSlot = rejoinPlayersToQueuePreservingOrder(
+                playerMap,
+                team.players || [],
+                startSlotMs
+              );
               teamsStore.delete(team.id);
+              return nextSlot;
             };
 
             const rosterA = [...(teamA.players || [])];
             const rosterB = [...(teamB.players || [])];
 
+            let requeueSlot = nextRequeueSlotMs(playerMap);
             if (result === 'A_win') {
-              dissolveTeamToPlayerQueue(teamB);
+              requeueSlot = dissolveTeamToPlayerQueue(teamB, requeueSlot);
             } else if (result === 'B_win') {
-              dissolveTeamToPlayerQueue(teamA);
+              requeueSlot = dissolveTeamToPlayerQueue(teamA, requeueSlot);
             } else {
-              dissolveTeamToPlayerQueue(teamA);
-              dissolveTeamToPlayerQueue(teamB);
+              requeueSlot = dissolveTeamToPlayerQueue(teamA, requeueSlot);
+              requeueSlot = dissolveTeamToPlayerQueue(teamB, requeueSlot);
             }
 
             for (const p of Object.values(playerMap)) {
@@ -1917,9 +2521,9 @@ export async function updateScheduledMatchTeams(matchId, teamAId, teamBId, optio
 }
 
 /**
- * Remove uma partida agendada e as stats associadas em player_stats.
+ * Remove partida (agendada ou finalizada) e stats em player_stats dessa partida.
  */
-export async function cancelScheduledMatch(matchId) {
+export async function deleteMatch(matchId) {
   const db = await openDB();
   const tx = db.transaction(['matches', 'player_stats'], 'readwrite');
   const matchesStore = tx.objectStore('matches');
@@ -1929,9 +2533,9 @@ export async function cancelScheduledMatch(matchId) {
     const mReq = matchesStore.get(matchId);
     mReq.onsuccess = () => {
       const match = mReq.result;
-      if (!match || match.status !== 'scheduled') {
+      if (!match) {
         tx.abort();
-        reject(new Error('Partida agendada não encontrada.'));
+        reject(new Error('Partida não encontrada.'));
         return;
       }
       matchesStore.delete(matchId);
@@ -1940,7 +2544,7 @@ export async function cancelScheduledMatch(matchId) {
         matchId,
         () => {
           tx.oncomplete = () => {
-            notifyChange('match_cancelled');
+            notifyChange('match_deleted');
             resolve();
           };
         },
@@ -1951,6 +2555,17 @@ export async function cancelScheduledMatch(matchId) {
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error || new Error('Transação abortada.'));
   });
+}
+
+/**
+ * Remove uma partida agendada e as stats associadas em player_stats.
+ */
+export async function cancelScheduledMatch(matchId) {
+  const match = await getMatchById(matchId);
+  if (!match || match.status !== 'scheduled') {
+    throw new Error('Partida agendada não encontrada.');
+  }
+  return deleteMatch(matchId);
 }
 
 // ---------- Stats por partida ----------
@@ -2152,59 +2767,33 @@ export async function bulkUpsertPlayerStats(matchId, roundId, payload) {
 export async function getRoundStatistics(roundId) {
   const matches = await getMatches(roundId);
   const finalized = matches.filter((m) => m.status === 'finalized' && m.result);
-  const matchIds = finalized.map((m) => m.id);
-
+  const db = await openDB();
+  const tx = db.transaction(['player_stats', 'players'], 'readonly');
+  const allStats = await promisify(tx.objectStore('player_stats').getAll());
+  const players = await promisify(tx.objectStore('players').getAll());
   const teams = await getTeams(roundId);
   const playerIdsInRound = new Set();
   for (const t of teams) {
-    for (const pid of t.players) {
-      playerIdsInRound.add(pid);
-    }
+    for (const pid of t.players || []) playerIdsInRound.add(pid);
   }
-
-  const db = await openDB();
-  const tx = db.transaction(['player_stats', 'players'], 'readonly');
-  const statsStore = tx.objectStore('player_stats');
-  const playersStore = tx.objectStore('players');
-
-  const allStats = await new Promise((resolve, reject) => {
-    const r = statsStore.getAll();
-    r.onsuccess = () => resolve(r.result || []);
-    r.onerror = () => reject(r.error);
+  const statsForRound = (allStats || []).filter((s) => s.roundId === roundId);
+  return aggregatePlayerStatistics({
+    players,
+    statsRows: statsForRound,
+    finalizedMatches: finalized,
+    seedPlayerIds: playerIdsInRound,
   });
+}
 
-  const statsForRound = allStats.filter(
-    (s) => s.roundId === roundId && matchIds.includes(s.matchId)
-  );
-
-  const players = await new Promise((resolve, reject) => {
-    const r = playersStore.getAll();
-    r.onsuccess = () => resolve(r.result || []);
-    r.onerror = () => reject(r.error);
-  });
-  const playerById = Object.fromEntries(players.map((p) => [p.id, p]));
-
+function aggregatePlayerStatistics({ players, statsRows, finalizedMatches, seedPlayerIds = null }) {
+  const playerById = Object.fromEntries((players || []).map((p) => [p.id, p]));
   const byPlayer = {};
-  for (const pid of playerIdsInRound) {
-    byPlayer[pid] = {
-      playerId: pid,
-      name: playerById[pid]?.name || pid,
-      goals: 0,
-      assists: 0,
-      ownGoals: 0,
-      matches: new Set(),
-      goalkeeperMatches: new Set(),
-      wins: 0,
-      losses: 0,
-      draws: 0,
-    };
-  }
 
-  for (const s of statsForRound) {
-    if (!byPlayer[s.playerId]) {
-      byPlayer[s.playerId] = {
-        playerId: s.playerId,
-        name: playerById[s.playerId]?.name || s.playerId,
+  function ensurePlayerRow(pid) {
+    if (!byPlayer[pid]) {
+      byPlayer[pid] = {
+        playerId: pid,
+        name: playerById[pid]?.name || pid,
         goals: 0,
         assists: 0,
         ownGoals: 0,
@@ -2215,31 +2804,39 @@ export async function getRoundStatistics(roundId) {
         draws: 0,
       };
     }
-    const row = byPlayer[s.playerId];
-    row.goals += s.goals;
-    row.assists += s.assists;
-    row.ownGoals += s.ownGoals || 0;
-    row.matches.add(s.matchId);
-    if (s.wasGoalkeeper) {
-      row.goalkeeperMatches.add(s.matchId);
-    }
+    return byPlayer[pid];
   }
 
-  for (const m of finalized) {
-    const matchStats = statsForRound.filter((s) => s.matchId === m.id);
+  if (seedPlayerIds) {
+    for (const pid of seedPlayerIds) ensurePlayerRow(pid);
+  } else {
+    for (const p of players || []) ensurePlayerRow(p.id);
+  }
+
+  const finalizedById = new Map((finalizedMatches || []).map((m) => [m.id, m]));
+  const statsByMatch = {};
+  for (const s of statsRows || []) {
+    if (!finalizedById.has(s.matchId)) continue;
+    const row = ensurePlayerRow(s.playerId);
+    row.goals += Number(s.goals) || 0;
+    row.assists += Number(s.assists) || 0;
+    row.ownGoals += Number(s.ownGoals) || 0;
+    row.matches.add(s.matchId);
+    if (s.wasGoalkeeper) row.goalkeeperMatches.add(s.matchId);
+    if (!statsByMatch[s.matchId]) statsByMatch[s.matchId] = [];
+    statsByMatch[s.matchId].push(s);
+  }
+
+  for (const m of finalizedMatches || []) {
+    const matchStats = statsByMatch[m.id] || [];
     const seen = new Set();
     for (const s of matchStats) {
       if (seen.has(s.playerId)) continue;
       seen.add(s.playerId);
-      const row = byPlayer[s.playerId];
-      if (!row) continue;
-      if (m.draw) {
-        row.draws += 1;
-      } else if (m.winningTeamId === s.teamId) {
-        row.wins += 1;
-      } else {
-        row.losses += 1;
-      }
+      const row = ensurePlayerRow(s.playerId);
+      if (m.draw) row.draws += 1;
+      else if (m.winningTeamId === s.teamId) row.wins += 1;
+      else row.losses += 1;
     }
   }
 
@@ -2248,6 +2845,20 @@ export async function getRoundStatistics(roundId) {
     matches: row.matches.size,
     goalkeeperMatches: row.goalkeeperMatches.size,
   }));
+}
+
+export async function getGlobalPlayerStatistics() {
+  const matches = await getMatches();
+  const finalized = matches.filter((m) => m.status === 'finalized' && m.result);
+  const db = await openDB();
+  const tx = db.transaction(['player_stats', 'players'], 'readonly');
+  const allStats = await promisify(tx.objectStore('player_stats').getAll());
+  const players = await promisify(tx.objectStore('players').getAll());
+  return aggregatePlayerStatistics({
+    players,
+    statsRows: allStats || [],
+    finalizedMatches: finalized,
+  });
 }
 
 // ---------- Próxima partida ----------
@@ -2377,7 +2988,123 @@ export async function getPlayerStats() {
     ...p,
     goals: p.goals || 0,
     assists: p.assists || 0,
+    preferGoalkeeper: Boolean(p.preferGoalkeeper),
+    goalkeeperOnly: Boolean(p.goalkeeperOnly),
   }));
+}
+
+export async function runDatastoreMaintenance() {
+  const db = await openDB();
+  const readTx = db.transaction(['players', 'teams', 'matches', 'rounds', 'player_stats'], 'readonly');
+  const players = await promisify(readTx.objectStore('players').getAll());
+  const teams = await promisify(readTx.objectStore('teams').getAll());
+  const matches = await promisify(readTx.objectStore('matches').getAll());
+  const rounds = await promisify(readTx.objectStore('rounds').getAll());
+  const stats = await promisify(readTx.objectStore('player_stats').getAll());
+
+  const matchIds = new Set((matches || []).map((m) => m.id));
+  const roundIds = new Set((rounds || []).map((r) => r.id));
+
+  const orphanStatIds = [];
+  for (const row of stats || []) {
+    if (!matchIds.has(row.matchId) || !roundIds.has(row.roundId)) {
+      orphanStatIds.push(row.id);
+    }
+  }
+
+  const playerIdStrSet = new Set((players || []).map((p) => String(p.id)));
+  const playerByIdMaint = Object.fromEntries((players || []).map((p) => [String(p.id), p]));
+
+  const cleanedTeams = [];
+  let scrubbedTeamPlayerSlots = 0;
+  for (const team of teams || []) {
+    const orig = team.players || [];
+    const next = orig.filter((pid) => {
+      if (!playerIdStrSet.has(String(pid))) return false;
+      const p = playerByIdMaint[String(pid)];
+      if (!p) return false;
+      if (team.status === 'waiting') {
+        return isStatusAvailable(p.status) && !isGoalkeeperOnlyPlayer(p);
+      }
+      if (team.status === 'in_field') {
+        return p.status === 'in_field';
+      }
+      return true;
+    });
+    if (next.length !== orig.length) {
+      scrubbedTeamPlayerSlots += orig.length - next.length;
+      cleanedTeams.push({ ...team, players: next });
+    }
+  }
+
+  const teamById = new Map((teams || []).map((t) => [t.id, { ...t }]));
+  for (const c of cleanedTeams) {
+    if ((c.players || []).length === 0) teamById.delete(c.id);
+    else teamById.set(c.id, c);
+  }
+  const onRoster = new Set();
+  for (const t of teamById.values()) {
+    for (const pid of t.players || []) {
+      onRoster.add(String(pid));
+    }
+  }
+  const staleInFieldIds = (players || [])
+    .filter((p) => p.status === 'in_field' && !onRoster.has(String(p.id)))
+    .sort(sortPlayersByJoinedAtThenId)
+    .map((p) => p.id);
+
+  if (!orphanStatIds.length && !cleanedTeams.length && !staleInFieldIds.length) {
+    return {
+      removedStats: 0,
+      scrubbedTeamPlayerSlots: 0,
+      teamsUpdated: 0,
+      requeuedGhostInField: 0,
+    };
+  }
+
+  const writeTx = db.transaction(['player_stats', 'teams', 'players'], 'readwrite');
+  const statsStore = writeTx.objectStore('player_stats');
+  const teamsStore = writeTx.objectStore('teams');
+  const playersStore = writeTx.objectStore('players');
+  for (const statId of orphanStatIds) statsStore.delete(statId);
+  for (const team of cleanedTeams) {
+    if ((team.players || []).length === 0) teamsStore.delete(team.id);
+    else teamsStore.put(team);
+  }
+
+  return new Promise((resolve, reject) => {
+    const finish = () => {
+      writeTx.oncomplete = () => {
+        notifyChange('datastore_maintenance');
+        resolve({
+          removedStats: orphanStatIds.length,
+          scrubbedTeamPlayerSlots,
+          teamsUpdated: cleanedTeams.length,
+          requeuedGhostInField: staleInFieldIds.length,
+        });
+      };
+      writeTx.onerror = () => reject(writeTx.error);
+    };
+
+    if (!staleInFieldIds.length) {
+      finish();
+      return;
+    }
+
+    const pAll = playersStore.getAll();
+    pAll.onsuccess = () => {
+      const raw = pAll.result || [];
+      const playerMap = Object.fromEntries(raw.map((p) => [p.id, { ...p }]));
+      const startSlot = nextRequeueSlotMs(playerMap);
+      rejoinPlayersToQueuePreservingOrder(playerMap, staleInFieldIds, startSlot);
+      for (const pid of staleInFieldIds) {
+        const p = playerMap[pid];
+        if (p) playersStore.put(p);
+      }
+      finish();
+    };
+    pAll.onerror = () => reject(pAll.error);
+  });
 }
 
 // ---------- Export / Import ----------
@@ -2424,7 +3151,11 @@ export async function importData(json) {
   }
 
   for (const player of json.players) {
-    tx.objectStore('players').add(player);
+    tx.objectStore('players').add({
+      ...player,
+      preferGoalkeeper: Boolean(player.preferGoalkeeper || player.goalkeeperOnly),
+      goalkeeperOnly: Boolean(player.goalkeeperOnly),
+    });
   }
 
   if (hasRounds) {

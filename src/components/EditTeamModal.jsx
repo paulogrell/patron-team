@@ -14,6 +14,7 @@ export default function EditTeamModal({
   teamSize = 5,
   onClose,
   onSave,
+  onDelete,
 }) {
   const [text, setText] = useState(team?.displayName ?? '');
   const [rosterIds, setRosterIds] = useState(() => [...(team?.players || [])]);
@@ -189,6 +190,15 @@ export default function EditTeamModal({
           </p>
 
           <div className="modal-actions">
+            {onDelete && (
+              <button
+                type="button"
+                className="btn btn-danger-outline"
+                onClick={() => onDelete(team.id)}
+              >
+                Excluir time
+              </button>
+            )}
             <button type="button" className="btn btn-outline" onClick={handleClearLabel}>
               Limpar rótulo
             </button>

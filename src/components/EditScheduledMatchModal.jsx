@@ -75,37 +75,41 @@ export default function EditScheduledMatchModal({
               adversários.
             </p>
           )}
-          <div className="edit-match-selects">
-            <label className="modal-form-label" htmlFor="edit-match-team-a">
-              Lado A do confronto (placar / stats)
-            </label>
-            <select
-              id="edit-match-team-a"
-              className="input-text"
-              value={teamAId}
-              onChange={(e) => setTeamAId(e.target.value)}
-            >
-              {optionTeams.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {teamOptionLabel(t, teamLabelById)}
-                </option>
-              ))}
-            </select>
-            <label className="modal-form-label" htmlFor="edit-match-team-b">
-              Lado B do confronto (placar / stats)
-            </label>
-            <select
-              id="edit-match-team-b"
-              className="input-text"
-              value={teamBId}
-              onChange={(e) => setTeamBId(e.target.value)}
-            >
-              {optionTeams.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {teamOptionLabel(t, teamLabelById)}
-                </option>
-              ))}
-            </select>
+          <div className="edit-match-selects edit-match-grid-ab">
+            <div>
+              <label className="modal-form-label" htmlFor="edit-match-team-a">
+                Time A — esquerda (placar / stats)
+              </label>
+              <select
+                id="edit-match-team-a"
+                className="input-text"
+                value={teamAId}
+                onChange={(e) => setTeamAId(e.target.value)}
+              >
+                {optionTeams.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {teamOptionLabel(t, teamLabelById)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="modal-form-label" htmlFor="edit-match-team-b">
+                Time B — direita (placar / stats)
+              </label>
+              <select
+                id="edit-match-team-b"
+                className="input-text"
+                value={teamBId}
+                onChange={(e) => setTeamBId(e.target.value)}
+              >
+                {optionTeams.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {teamOptionLabel(t, teamLabelById)}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
           <div className="modal-actions">
             <button type="button" className="btn btn-outline btn-danger-outline" onClick={handleCancelMatchClick}>
