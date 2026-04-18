@@ -511,7 +511,6 @@ body {
 
 .player-item-draggable {
   cursor: grab;
-  touch-action: none;
 }
 
 .player-item-draggable:active {
@@ -609,7 +608,6 @@ body {
 
 .team-card-sortable-wrap {
   cursor: grab;
-  touch-action: none;
 }
 
 .team-card-sortable-wrap:active {
