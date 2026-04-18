@@ -3,7 +3,6 @@ import {
   DndContext,
   closestCenter,
   PointerSensor,
-  TouchSensor,
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
@@ -200,12 +199,7 @@ export default function QueueList({
     tired: 'status-tired',
   };
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(TouchSensor, {
-      activationConstraint: { delay: 200, tolerance: 8 },
-    })
-  );
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
   const itemIds = useMemo(() => players.map((p) => p.id), [players]);
 
@@ -243,8 +237,7 @@ export default function QueueList({
       <h2>Fila de Jogadores ({players.length})</h2>
       {onReorderLinePlayers && players.some((p) => p.status === 'available') && (
         <p className="queue-drag-hint">
-          Arraste o card do jogador (inteiro) para repriorizar quem está disponível — segure um instante em
-          telas touch.
+          Arraste o card do jogador (inteiro) para repriorizar quem está disponível.
         </p>
       )}
       {players.length === 0 ? (
