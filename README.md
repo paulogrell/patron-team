@@ -8,15 +8,21 @@ O **Arjen Queue** é uma aplicação React que funciona completamente offline, u
 
 ### Principais funcionalidades
 
+- 📅 **Rodadas** — Várias rodadas locais; troca de rodada ativa e “Nova rodada”; times e partidas ficam escopados por `roundId`
 - 📋 **Fila FIFO** — Jogadores entram na fila por ordem de chegada
-- 👥 **Formação automática de times** — Seleciona os primeiros N disponíveis
+- 👥 **Formação de times** — Um time por vez ou **vários times de uma vez** (N × jogadores por time)
+- ⚖️ **Rebalancear** — Redistribui elencos entre times em campo não bloqueados (round-robin)
+- 💡 **Próxima partida (MVP)** — Sugestão com dois primeiros times em campo; opção de **agendar** partida, editar **stats por partida**, depois **finalizar**
 - 🔄 **Substituição inteligente** — Substitui jogadores lesionados/cansados atomicamente
-- 🏆 **Registro de partidas** — Vitória, derrota ou empate com regras automáticas
-- 📊 **Estatísticas de jogadores** — Controle de gols e assistências por jogador
-- 💾 **Export/Import** — Backup completo em JSON
+- 🏆 **Registro de partidas** — Vitória, derrota ou empate com regras automáticas na rodada
+- 📊 **Estatísticas** — Aba **globais** (`players.goals` / `assists`) e aba **da rodada** (somente `player_stats` das partidas finalizadas; alinhado conceitualmente ao SLF)
+- 🔒 **Times bloqueados** — Excluídos do rebalanceamento MVP e da sugestão simples
+- 💾 **Export/Import** — Backup JSON `schemaVersion: 3` (`rounds`, `meta`, `player_stats`)
 - 📡 **Sincronização entre abas** — Via BroadcastChannel
 - 📱 **PWA Offline** — Funciona sem internet após primeiro carregamento
 - 🚀 **Deploy no GitHub Pages** — Workflow automático via GitHub Actions
+- 🌙 **Modo escuro** — Tema claro/escuro persistido (`localStorage`) e detecção pelo sistema
+- ⏱️ **Cronômetro da partida** — No painel **Controles**; atalhos iniciam na hora; várias agendadas: escolher qual
 
 ## Instalação
 
@@ -53,22 +59,33 @@ npm run test:watch
 ### 1. Adicionar jogadores
 No painel **Controles**, digite o nome do jogador e clique em **➕ Adicionar**. Os jogadores aparecem na fila ordenados por chegada.
 
-### 2. Formar times
-Defina o número de jogadores por time e clique em **👥 Formar Time**. Os primeiros N jogadores disponíveis serão automaticamente selecionados (FIFO).
+### 2. Rodada ativa
+No painel **Rodada**, escolha a rodada ou crie uma nova. Todos os times e partidas exibidos pertencem à rodada ativa.
 
-### 3. Registrar partidas
+### 3. Formar times
+Use **Formar todos os times possíveis** (FIFO, um clique esvazia a fila até não dar time completo) ou **Formar vários times** com quantidade de times e jogadores por time. **Rebalancear** redistribui só entre times em campo não bloqueados.
+
+### 4. Registrar partidas
 Com pelo menos 2 times em campo, use os botões para registrar o resultado:
 - **🏆 Time A Venceu** — Time B volta para o fim da fila
 - **🏆 Time B Venceu** — Time A volta para o fim da fila
 - **🤝 Empate** — Ambos os times saem e voltam ao fim da fila
 
-### 4. Lesões e substituições
+### 5. Partida agendada, cronômetro e stats
+**Sugerir confronto** e **Agendar partida sugerida** criam uma partida agendada. No histórico, abra **Stats** para gols/assistências/gols contra/goleiro por jogador (validações tipo SLF); no mesmo modal, em **Resultado**, escolha quem venceu ou **Empate** (salva stats e finaliza — empate pode abrir desempate).
+
+**Cronômetro:** no painel **Controles** (lateral), após agendar uma partida, use **5 / 10 / 15 min e iniciar** para começar na hora, ou edite os minutos (**Salvar duração** ou blur no campo) e **Iniciar**. **Zerar** interrompe sem mudar a duração salva. Várias partidas agendadas: escolha qual no menu **Partida agendada**. O tempo também aparece na faixa abaixo de **Rodada** quando houver countdown ativo.
+
+### Tema (modo escuro)
+Use o botão **lua / sol** no canto superior esquerdo do cabeçalho (ou no canto da tela de login). A escolha fica em `localStorage`; na primeira visita, usa a preferência do sistema (`prefers-color-scheme`).
+
+### 6. Lesões e substituições
 Para jogadores em campo:
 - **🤕 Lesão** — Marca como lesionado e remove do time
 - **😓 Cansado** — Marca como cansado
 - **🔄 Substituir** — Substitui pelo próximo jogador disponível na fila
 
-### 5. Estatísticas de jogadores (⚽ Gols & 👟 Assistências)
+### 7. Estatísticas de jogadores (⚽ Gols & 👟 Assistências)
 Clique na aba **📊 Estatísticas** no topo da aplicação para acessar o módulo de estatísticas. Neste painel você pode:
 - Ver todos os jogadores com seus gols, assistências e total de participações
 - Usar os botões **+** e **−** ao lado de cada jogador para registrar/corrigir gols e assistências
@@ -76,7 +93,10 @@ Clique na aba **📊 Estatísticas** no topo da aplicação para acessar o módu
 - Ordenar por nome, gols, assistências ou total clicando nos cabeçalhos das colunas
 - Acompanhar o resumo geral (total de jogadores, gols, assistências e participações) no topo
 
-### 6. Backup e restore
+### 8. Estatísticas da rodada
+A terceira aba agrega vitórias/empates/derrotas e números por partida a partir de `player_stats` (não usa os totais globais da segunda aba).
+
+### 9. Backup e restore
 - **📤 Exportar** — Baixa um arquivo JSON com todos os dados (incluindo gols e assistências)
 - **📥 Importar** — Carrega um arquivo JSON substituindo todos os dados
 
@@ -197,14 +217,20 @@ vercel
 - [ ] Sincronização em nuvem (Firebase/Supabase)
 - [ ] Notificações push quando é hora de jogar
 - [x] ~~Estatísticas de gols e assistências por jogador~~
-- [ ] Estatísticas de vitórias/derrotas por jogador
-- [ ] Modo escuro
-- [ ] Drag & drop para reordenar fila manualmente
-- [ ] Timer de partida integrado
+- [x] ~~Modo escuro~~ (`data-theme`, `src/theme.js`, `src/components/ThemeToggle.jsx`)
+- [x] ~~Timer de partida integrado~~ (countdown persistido: `timerDurationMinutes`, `countdownEndsAt` em `indexeddb.js`)
+- [x] ~~Drag & drop para reordenar fila manualmente~~ (jogadores **disponíveis**; `@dnd-kit`; `reorderLinePlayersInQueueOrder`)
+- [x] ~~Estatísticas de vitórias/derrotas por jogador~~ (aba da rodada + globais com V/E/D)
+- [x] ~~Garbage collector mantendo lista e stats~~ (manutenção em Controles)
+- [x] ~~Botões ++ e -- nos gols e assistências~~ (rótulos nos botões; modal de stats e aba global)
+- [x] ~~Lista separada de goleiro~~
+- [x] ~~Fila de times em espera: FIFO + desempate por data (`enteredWaitingAt` / `createdAt`)~~ — ver `src/domain/waitingQueueOrder.js`
+- [ ] Ordenação da fila de times **só** por data — toggle ou vista alternativa na UI (opcional)
 
 ## Tecnologias
 
 - **React 18** + **Vite** — Framework e bundler
+- **@dnd-kit** — Arrastar e soltar na fila de jogadores (disponíveis)
 - **IndexedDB** — Banco de dados local (sem dependências externas)
 - **BroadcastChannel API** — Sincronização entre abas
 - **Service Worker** — Cache offline (PWA)

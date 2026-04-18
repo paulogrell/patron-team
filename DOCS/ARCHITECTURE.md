@@ -27,12 +27,12 @@ com IndexedDB como persistência local e BroadcastChannel para sincronização e
 │  ┌──────────────────────────┐                        │
 │  │    IndexedDB (teamQueueDB)│                       │
 │  │                           │                       │
-│  │  ┌─────────┐ ┌────────┐  │                       │
-│  │  │ players │ │ teams  │  │                       │
-│  │  └─────────┘ └────────┘  │                       │
-│  │  ┌─────────┐             │                       │
-│  │  │ matches │             │                       │
-│  │  └─────────┘             │                       │
+│  │  ┌─────────┐ ┌────────┐ ┌─────────┐              │
+│  │  │ players │ │ teams  │ │ rounds  │              │
+│  │  └─────────┘ └────────┘ └─────────┘              │
+│  │  ┌─────────┐ ┌──────────────┐ ┌──────┐           │
+│  │  │ matches │ │ player_stats │ │ meta │           │
+│  │  └─────────┘ └──────────────┘ └──────┘           │
 │  └──────────────────────────┘                        │
 └─────────────────────────────────────────────────────┘
 ```
@@ -53,57 +53,105 @@ com IndexedDB como persistência local e BroadcastChannel para sincronização e
 - `joinedAt` — Para ordenação FIFO
 - `status` — Para filtrar por status
 
+### rounds
+| Campo     | Tipo     | Descrição                    |
+|----------|----------|------------------------------|
+| id       | string   | UUID (keyPath)               |
+| name     | string   | Nome exibido na UI           |
+| createdAt| string   | ISO                          |
+| updatedAt| string   | ISO                          |
+| status   | string   | `active` \| `archived`       |
+
+### meta
+| Campo | Tipo   | Descrição                          |
+|-------|--------|------------------------------------|
+| key   | string | keyPath (ex.: `activeRoundId`)     |
+| value | string | ID da rodada ativa na UI           |
+
 ### teams
 | Campo     | Tipo       | Descrição                          |
 |----------|------------|-------------------------------------|
 | id       | string     | UUID (keyPath)                     |
+| roundId  | string     | Rodada à qual o time pertence      |
 | players  | string[]   | Array de IDs de jogadores          |
 | status   | string     | `in_field` \| `waiting`            |
+| isBlocked| boolean    | Excluído da sugestão MVP / rebalance |
 | createdAt| string     | ISO timestamp de criação           |
 
 **Índices:**
 - `status` — Para filtrar times em campo/aguardando
+- `roundId` — Listar times da rodada
 
 ### matches
-| Campo     | Tipo     | Descrição                              |
-|----------|----------|----------------------------------------|
-| id       | string   | UUID (keyPath)                         |
-| teamA    | string   | ID do time A                           |
-| teamB    | string   | ID do time B                           |
-| result   | string   | `A_win` \| `B_win` \| `draw`          |
-| timestamp| string   | ISO timestamp do registro              |
+| Campo          | Tipo     | Descrição                              |
+|---------------|----------|----------------------------------------|
+| id            | string   | UUID (keyPath)                         |
+| roundId       | string   | Rodada                                 |
+| teamA         | string   | ID do time A                           |
+| teamB         | string   | ID do time B                           |
+| result        | string \| null | `A_win` \| `B_win` \| `draw` (null se agendada) |
+| status        | string   | `scheduled` \| `finalized`             |
+| draw          | boolean  | Derivado do resultado                  |
+| winningTeamId | string \| null | Time vencedor (se não empate)   |
+| timestamp     | string   | ISO (última atualização / registro)   |
+
+**Índices:**
+- `roundId` — Histórico por rodada
+
+### player_stats
+| Campo          | Tipo    | Descrição                    |
+|---------------|---------|------------------------------|
+| id            | string  | keyPath: `${matchId}-${teamId}-${playerId}` |
+| roundId       | string  | Denormalizado                |
+| matchId       | string  | Partida                      |
+| teamId        | string  | Time na partida              |
+| playerId      | string  | Jogador                      |
+| goals         | number  | Gols                         |
+| assists       | number  | Assistências                 |
+| ownGoals      | number  | Gols contra                  |
+| wasGoalkeeper | boolean | Goleiro nesta partida        |
+
+**Índices:** `matchId`, `roundId`
+
+**Política:** `players.goals` / `players.assists` permanecem como **totais legados** (aba Estatísticas globais). As **estatísticas da rodada** na UI usam apenas `player_stats` das partidas finalizadas da rodada (podem divergir dos totais globais até eventual sincronização manual).
 
 ---
 
 ## Sequência de Transações
 
-### formTeam(size)
+### formTeam(size, roundId)
 
 ```
-1. Abrir transação readwrite em [players, teams]
-2. Abrir cursor no índice joinedAt (players)
-3. Para cada cursor:
+1. Abrir transação readwrite em [players, teams, rounds]
+2. Validar existência da rodada
+3. Abrir cursor no índice joinedAt (players)
+4. Para cada cursor:
    a. Se player.status === 'available' E selecionados < size:
       - Atualizar player.status = 'in_field'
       - cursor.update(player)
       - Adicionar player.id à lista
    b. Avançar cursor
-4. Se selecionados < size:
+5. Se selecionados < size:
    → ABORT transação (jogadores insuficientes)
-5. Criar objeto team:
-   { id: UUID, players: [...ids], status: 'in_field', createdAt: now }
-6. Inserir team na store 'teams'
-7. COMMIT (automático ao completar)
+6. Criar objeto team:
+   { id: UUID, roundId, players: [...ids], status: 'in_field', isBlocked: false, createdAt: now }
+7. Inserir team na store 'teams'
+8. COMMIT (automático ao completar)
 ```
 
 **Garantia de atomicidade:** Se qualquer passo falhar, a transação inteira é revertida e nenhum jogador é marcado como `in_field`.
 
-### recordMatch(teamAId, teamBId, result)
+### formTeamsForRound / rebalanceTeams
+
+- **formTeamsForRound:** uma transação seleciona `teamCount * playersPerTeam` jogadores FIFO e cria N times com o mesmo `roundId`.
+- **rebalanceTeams(roundId, { activeTeamsOnly }):** coleta jogadores dos times `in_field` (opcionalmente só não bloqueados), ordena times por `createdAt`, redistribui em round-robin e grava os elencos.
+
+### recordMatch(roundId, teamAId, teamBId, result)
 
 ```
 1. Abrir transação readwrite em [players, teams, matches]
-2. Buscar teamA e teamB por ID
-3. Validar existência dos times
+2. Buscar teamA e teamB; validar roundId
+3. Carregar todos os players (getAll), aplicar regras de fila em memória, gravar puts
 4. Conforme resultado:
 
    SE result === 'A_win':
@@ -125,13 +173,21 @@ com IndexedDB como persistência local e BroadcastChannel para sincronização e
        - player.status = 'available'
        - player.joinedAt = now
 
-5. Criar registro de match:
-   { id: UUID, teamA, teamB, result, timestamp: now }
+5. Criar registro de match finalizado (status `finalized`, winningTeamId, draw)
 6. Inserir match na store 'matches'
 7. COMMIT
 ```
 
-### removePlayer(playerId, reason, substitute)
+### scheduleMatch / finalizeMatch
+
+- **scheduleMatch:** insere partida com `status: 'scheduled'`, `result: null`.
+- **finalizeMatch(matchId, result):** aplica as mesmas regras de fila que `recordMatch` e atualiza o registro.
+
+### bulkUpsertPlayerStats
+
+Valida elenco (jogador pertence ao time na partida), executa `validateMatchPlayerStats` (`src/domain/playerStatRules.js`), apaga stats antigas do `matchId` e grava novas linhas.
+
+### removePlayer(playerId, reason, substitute, roundId?)
 
 ```
 1. Abrir transação readwrite em [players, teams]
@@ -167,21 +223,28 @@ Aba 1 faz operação (ex: addPlayer)
         └─ Callback chama refreshData() → recarrega tudo do IndexedDB
 ```
 
+## Domínio (JS puro)
+
+- `src/domain/playerStatRules.js` — invariantes tipo SLF `PlayerStat`.
+- `src/domain/nextMatchEngine.js` — sugestão MVP de confronto (dois primeiros times em campo não bloqueados).
+
 ## Componentes React
 
 ```
 App
-├── Navegação (Abas: Fila & Partidas / Estatísticas)
+├── RoundSelector (rodada ativa + nova rodada)
+├── Abas: Fila e partidas | Estatísticas globais | Estatísticas da rodada
 │
-├── [Aba: Fila & Partidas]
-│   ├── Controls        → Painel de ações (adicionar, formar time, partida, backup)
-│   ├── QueueList       → Lista de jogadores na fila (FIFO)
-│   └── RightColumn
-│       ├── TeamsPanel  → Cards dos times em campo (TeamCard)
-│       └── MatchHistory → Histórico de partidas
+├── [Fila e partidas]
+│   ├── Controls (formar N times, rebalancear, sugerir/agendar, partida rápida, backup)
+│   ├── QueueList
+│   └── TeamCard + MatchHistory (+ modal MatchStatsModal)
 │
-└── [Aba: Estatísticas]
-    └── PlayerStats     → Tabela com gols, assistências e controles (+/−)
+├── [Estatísticas globais]
+│   └── PlayerStats (totais em players.*)
+│
+└── [Estatísticas da rodada]
+    └── RoundStatistics (agregado via getRoundStatistics)
 ```
 
 ### Estatísticas de Jogadores (recordGoal / recordAssist)
@@ -195,9 +258,9 @@ App
 6. Notificar outras abas via BroadcastChannel
 ```
 
-**Migração v1 → v2:** Ao atualizar o banco da versão 1 para a 2,
-todos os jogadores existentes recebem `goals: 0` e `assists: 0`
-automaticamente no `onupgradeneeded`.
+**Migrações:** v1 → stores base; v2 → `goals`/`assists` em players; v3 → `rounds`, `meta`, `player_stats`, índices `roundId`, rodada padrão “Importado” e backfill em times/partidas existentes.
+
+**Export JSON:** `schemaVersion: 3`, inclui `rounds`, `meta`, `player_stats`. Import sem `rounds` cria rodada única e preenche `roundId`.
 
 ## PWA / Service Worker
 
