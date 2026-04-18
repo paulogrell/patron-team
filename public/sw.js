@@ -3,7 +3,7 @@
  * Estratégia: Cache First com fallback para rede
  */
 
-const CACHE_NAME = 'team-queue-v2';
+const CACHE_NAME = 'team-queue-v4';
 const URLS_TO_CACHE = [
   './',
   './index.html',

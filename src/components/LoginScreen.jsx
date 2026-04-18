@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { verifyCredentials, saveSession } from '../auth/auth.js';
+import { verifyCredentials, saveSession, clearSession } from '../auth/auth.js';
+import { deleteDatabase } from '../api/indexeddb.js';
 
 /**
  * LoginScreen — Tela de autenticação exibida antes do acesso à aplicação.
@@ -36,6 +37,30 @@ export default function LoginScreen({ onLogin }) {
       setLoading(false);
     }
   };
+
+  const handleClearLocalData = async () => {
+    if (
+      !window.confirm(
+        'Apagar todos os dados locais (IndexedDB) e a sessão? Esta ação é só para desenvolvimento.'
+      )
+    ) {
+      return;
+    }
+    setError('');
+    setLoading(true);
+    try {
+      await deleteDatabase();
+      clearSession();
+      window.location.reload();
+    } catch (err) {
+      console.error(err);
+      setError('Não foi possível limpar o banco local.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const isDev = import.meta.env.DEV;
 
   return (
     <div className="login-overlay">
@@ -77,13 +102,26 @@ export default function LoginScreen({ onLogin }) {
 
         {error && <p className="login-error">{error}</p>}
 
-        <button
-          className="btn btn-primary login-btn"
-          type="submit"
-          disabled={loading}
-        >
-          {loading ? 'Verificando...' : 'Entrar'}
-        </button>
+        <div className={isDev ? 'login-actions login-actions--split' : 'login-actions'}>
+          <button
+            className="btn btn-primary login-btn"
+            type="submit"
+            disabled={loading}
+          >
+            {loading ? 'Verificando...' : 'Entrar'}
+          </button>
+          {isDev && (
+            <button
+              className="btn btn-outline login-btn login-btn-dev"
+              type="button"
+              disabled={loading}
+              title="Removido em build de produção (Vite)"
+              onClick={handleClearLocalData}
+            >
+              Limpar dados locais
+            </button>
+          )}
+        </div>
       </form>
     </div>
   );

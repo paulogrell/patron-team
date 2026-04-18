@@ -2,7 +2,7 @@
 <html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#1a7f37" />
     <meta name="description" content="Gerenciador de fila de times - offline first com IndexedDB" />
     <link rel="manifest" href="manifest.json" />
@@ -16,8 +16,11 @@
       // Registrar Service Worker para PWA offline
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
-          // Usa caminho relativo ao base path para compatibilidade com GH Pages
-          const base = document.querySelector('base')?.href || '/';
+          // Base deve ser URL absoluta; '/' quebra o construtor URL em vários browsers
+          const baseTag = document.querySelector('base');
+          const base =
+            baseTag?.href ||
+            window.location.href;
           const swUrl = new URL('sw.js', base).href;
           navigator.serviceWorker.register(swUrl)
             .then(reg => console.log('Service Worker registrado:', reg.scope))

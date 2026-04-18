@@ -8,8 +8,8 @@
     <link rel="manifest" href="manifest.json" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚽</text></svg>" />
     <title>Arjen - Fila de Times</title>
-    <script type="module" crossorigin src="/assets/index-RsAfs2zR.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-DfyeXPTV.css">
+    <script type="module" crossorigin src="/assets/index-Bfp_HN0A.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-CJPVqYJE.css">
   </head>
   <body>
     <div id="root"></div>
@@ -17,8 +17,11 @@
       // Registrar Service Worker para PWA offline
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
-          // Usa caminho relativo ao base path para compatibilidade com GH Pages
-          const base = document.querySelector('base')?.href || '/';
+          // Base deve ser URL absoluta; '/' quebra o construtor URL em vários browsers
+          const baseTag = document.querySelector('base');
+          const base =
+            baseTag?.href ||
+            window.location.href;
           const swUrl = new URL('sw.js', base).href;
           navigator.serviceWorker.register(swUrl)
             .then(reg => console.log('Service Worker registrado:', reg.scope))
